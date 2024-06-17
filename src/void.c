@@ -1,204 +1,205 @@
 #include "void.h"
 
-#define RAND_SEED 1337
+Tensor* init_tensor(Matrix* data, bool requires_grad) {
+    Tensor* tensor = (Tensor*)malloc(sizeof(Tensor));
+    tensor->data = MatrixCopy(data);
+    tensor->grad = NULL;
+    tensor->requires_grad = requires_grad;
+    tensor->grad_fn = NULL;
+    tensor->ctx = NULL;
 
-// NEURON
+    return tensor;
+}
 
-Neuron* InitNeuron(int in_dim, int out_dim, bool bias) {
-    assert(in_dim > 0 && out_dim > 0);
-    Neuron* n = (Neuron*)malloc(sizeof(Neuron));
-    if (n == NULL) {
-        return NULL;
+void free_tensor(Tensor* t) {
+    FreeMatrix(t->data);
+    if (t->grad != NULL) {
+        FreeMatrix(t->grad);
+    }
+    free(t);
+}
+
+void save_for_backward(Context* ctx, Tensor** tensors, int num_saved) {
+    ctx->saved_tensors = tensors;
+    ctx->num_saved = num_saved;
+}
+
+void print_tensor(Tensor* t) {
+    int max_digits = 0;
+    double max_val = 0.0;
+    double min_val = 0.0;
+
+    for (int i = 0; i < t->data->rows; i++) {
+        for (int j = 0; j < t->data->cols; j++) {
+            double val = fabs(MAT_AT(t->data, i, j));
+            if (val > max_val) {
+                max_val = val;
+            }
+            if (val < min_val || (min_val == 0.0)) {
+                min_val = val;
+            }
+        }
     }
 
-    // X * 2 - 1
-    n->weights = MatrixScalarSub(MatrixScalarMul(RandnMatrix(out_dim, in_dim, RAND_SEED), 2), 1);
-    if (bias) {
-        n->bias = MatrixScalarSub(MatrixScalarMul(RandnMatrix(out_dim, 1, RAND_SEED), 2), 1);
+    if ((max_val == 0.0 && min_val == 0.0) || (max_val == 1.0 && min_val == 1.0)) {
+        max_digits = 1;
     } else {
-        n->bias = ZerosMatrix(out_dim, 1);
+        max_digits = (int)log10(max_val) + 1 + 8;
     }
 
-    n->forward = NeuronForward;
-    n->backward = NeuronBackward;
-
-    return n;
-}
-
-void FreeNeuron(Neuron* n) {
-    FreeMatrix(n->weights);
-    FreeMatrix(n->bias);
-    free(n);
-}
-
-void PrintNeuron(Neuron* n) {
-    printf("Weights:\n");
-    PrintMatrix(n->weights);
-    printf("Bias:\n");
-    PrintMatrix(n->bias);
-}
-
-Matrix* NeuronForward(Neuron* n, Matrix** in) {
-    // x*W + B 
-    Matrix* z1 = MatrixMul(*in, n->weights);
-    Matrix* z2 = MatrixAdd(z1, n->bias);
-    
-    FreeMatrix(z1);
-
-    return z2;
-}
-
-void NeuronBackward(Neuron* n, Matrix* in, Matrix* pred, Matrix* targ, double lr) {
-    Matrix* dloss = MSEBackward(pred, targ);
-    Matrix* dw = MatrixDotProduct(MatrixTranspose(in), dloss);
-    Matrix* db = MatrixSumVals(dloss, 0);
-
-    Matrix* new_weights = MatrixSub(n->weights, MatrixScalarMul(dw, lr));
-    Matrix* new_bias    = MatrixSub(n->bias   , MatrixScalarMul(db, lr));
-
-    FreeMatrix(new_bias);
-    FreeMatrix(new_weights);
-    
-    n->weights = new_weights;
-    n->bias    = new_bias;
-
-    FreeMatrix(db);
-    FreeMatrix(dw);
-    FreeMatrix(dloss);
-}   
-
-// NEURAL NETWORK (NN)
-NN* InitNN(int in_dim, int hidden_dim, int out_dim, bool bias) {
-    NN* net = (NN*)malloc(sizeof(NN));
-    if (net == NULL) {
-        return NULL;
-    }
-
-    net->in  = InitNeuron(in_dim, hidden_dim, bias);
-    net->hd  = InitNeuron(hidden_dim, hidden_dim, bias);
-    net->out = InitNeuron(hidden_dim, out_dim, bias);
-
-    net->forward = NNForward;
-    net->backward = NNBackward;
-
-    return net;
-}
-
-void FreeNN(NN* net) {
-    FreeNeuron(net->in);
-    FreeNeuron(net->hd);
-    FreeNeuron(net->out);
-    free(net);
-}
-
-Matrix* NNForward(NN* net, Matrix** in) {
-    Matrix* z1 = net->in->forward(net->in, in);
-    Matrix* a1 = MatrixSigmoid(z1);
-
-    Matrix* z2 = net->hd->forward(net->hd, &a1);
-    Matrix* a2 = MatrixSigmoid(z2);
-
-    Matrix* out = net->out->forward(net->out, &a2);
-
-    FreeMatrix(z1);
-    FreeMatrix(a1);
-    FreeMatrix(z2);
-    FreeMatrix(a2);
-
-    return out;
-} 
-
-void NNBackward(NN* net, Matrix* in, Matrix* targ, double lr) {
-    // Forward
-    Matrix* z1 = net->in->forward(net->in, &in);
-    Matrix* a1 = MatrixSigmoid(z1);
-
-    Matrix* z2 = net->hd->forward(net->hd, &a1);
-    Matrix* a2 = MatrixSigmoid(z2);
-
-    Matrix* out = net->out->forward(net->out, &a2); 
-    
-    // Backward 
-    Matrix* dout = MSEBackward(out, targ);
-    net->out->backward(net->out, in, dout, a2, lr);
-    
-    PrintMatrix(net->out->weights);
-    PrintMatrix(dout);
-    PrintMatrix(MatrixMul(net->out->weights, dout));
-    Matrix* da2 = MatrixMul(dout, MatrixTranspose(net->out->weights));
-    Matrix* dz2 = MatrixSigmoidBackward(da2, a2);
-    net->hd->backward(net->hd, in, dz2, a1, lr);
-
-    Matrix* da1 = MatrixMul(dz2, MatrixTranspose(net->hd->weights));
-    Matrix* dz1 = MatrixSigmoidBackward(da1, a1);
-    net->in->backward(net->in, in, dz1, in, lr);
-
-    // Freeing the allocated memory
-    FreeMatrix(z1);
-    FreeMatrix(a1);
-    FreeMatrix(z2);
-    FreeMatrix(a2);
-    FreeMatrix(out);
-    FreeMatrix(dout);
-    FreeMatrix(da2);
-    FreeMatrix(dz2);
-    FreeMatrix(da1);
-    FreeMatrix(dz1);
-}
-
-Matrix* NNTrain(NN* net, Matrix** in, Matrix** targ, bool grad) {
-    return NULL;
-}
-
-// LOSS FUNCTION
-double MSE(Matrix* y_pred, Matrix* y_true) {
-    assert(y_pred->rows == y_true->rows);
-    assert(y_pred->cols == y_true->cols);
-    // out = (y_true - y_pred)^2
-    Matrix* diff = MatrixSub(y_pred, y_true);  // (y_pred - y_true)
-    Matrix* sq   = MatrixPower(diff, 2);       // (y_pred - y_true)**2
-    double sum   = MatrixSum(sq);              // sum((y_pred - y_true)**2)
-
-    FreeMatrix(diff);
-    FreeMatrix(sq);
-
-    return sum / y_pred->rows;                 // (1/N) * sum((y_pred - y_true)**2)
-}
-
-Matrix* MSEBackward(Matrix* y_pred, Matrix* y_true) {
-    // (2/N) * (y_pred - y_true)
-    Matrix* diff = MatrixSub(y_pred, y_true);           // (y_pred - y_true)          
-    Matrix* dbl  = MatrixScalarMul(diff, 2.0);          // 2 * (y_pred - y_true)
-    Matrix* grad = MatrixScalarDiv(dbl, y_pred->rows);  // (2/N) * (y_pred - y_true)
-    
-    FreeMatrix(dbl);
-    FreeMatrix(diff);
-
-    return grad;
-}
-
-// ACTIVATION FUNCTION
-double sigmoid(double x) {
-    // 1 / 1 + e^(-x)
-    return 1.0 / (1.0 + exp(-x));
-}
-
-Matrix* MatrixSigmoid(Matrix* m) {
-    Matrix* out = InitMatrix(m->rows, m->cols);
-    for (int i = 0; i < m->rows; i++) {
-        for (int j = 0; j < m->cols; j++) {
-            MAT_AT(out, i, j) = sigmoid(MAT_AT(m, i, j));
+    printf("Tensor(data=(\n[");
+    for (int i = 0; i < t->data->rows; i++) {
+        if (i == 0) {
+            printf("[");
+        } else {
+            printf(" [");
         }
+        for (int j = 0; j < t->data->cols; j++) {
+            printf("%*.*f ", max_digits, 5, MAT_AT(t->data, i, j));
+        }
+        if (i != t->data->rows-1) {
+            printf(" ]\n");
+        } else {
+            printf(" ]");
+        }
+    }
+    printf("]\n");
+    printf("), requires_grad=%d)\n\n", t->requires_grad);
+}
+
+void print_tensor_grad(Tensor* t) {
+    int max_digits = 0;
+    double max_val = 0.0;
+    double min_val = 0.0;
+
+    for (int i = 0; i < t->grad->rows; i++) {
+        for (int j = 0; j < t->grad->cols; j++) {
+            double val = fabs(MAT_AT(t->grad, i, j));
+            if (val > max_val) {
+                max_val = val;
+            }
+            if (val < min_val || (min_val == 0.0)) {
+                min_val = val;
+            }
+        }
+    }
+
+    if ((max_val == 0.0 && min_val == 0.0) || (max_val == 1.0 && min_val == 1.0)) {
+        max_digits = 1;
+    } else {
+        max_digits = (int)log10(max_val) + 1 + 8;
+    }
+    
+    if (t->requires_grad) {
+        printf("Tensor(grad=(\n[");
+        for (int i = 0; i < t->grad->rows; i++) {
+            if (i == 0) {
+                printf("[");
+            } else {
+                printf(" [");
+            }
+            for (int j = 0; j < t->grad->cols; j++) {
+                printf("%*.*f ", max_digits, 5, MAT_AT(t->grad, i, j));
+            }
+            if (i != t->grad->rows-1) {
+                printf(" ]\n");
+            } else {
+                printf(" ]");
+            }
+        }
+        printf("]\n");
+        printf(")\n");
+
+    } else {
+        printf("Tensor(grad=NULL)\n");
+    } 
+}
+
+void tensor_backward(Tensor* t, Matrix* grad) {
+    if (grad == NULL) {
+        grad = MatrixOnesLike(t->data);
+    }
+    if (t->grad == NULL) {
+        t->grad = grad;
+    } else {
+        for (int i = 0; i < t->data->rows * t->data->cols; i++) {
+            t->grad->data[i] += grad->data[i];
+        }
+    }
+    if (t->grad_fn != NULL) {
+        Tensor grad_output;
+        grad_output.data = grad;
+        t->grad_fn(&grad_output, t);
+    }
+}
+
+Tensor* add(Tensor* a, Tensor* b) {
+    Tensor* out = init_tensor(MatrixAdd(a->data, b->data), a->requires_grad || b->requires_grad);
+
+    if (out->requires_grad) {
+        out->ctx = (Context*)malloc(sizeof(Context));
+        Tensor* saved_tensors[2] = {a, b};
+        save_for_backward(out->ctx, saved_tensors, 2);
+        out->grad_fn = add_backward;
     }
     return out;
 }
 
-Matrix* MatrixSigmoidBackward(Matrix* m) {
-    Matrix* grad = InitMatrix(m->rows, m->cols);
-    for (int i = 0; i < m->rows; i++) {
-        for (int j = 0; j < m->cols; j++) {
-            MAT_AT(grad, i, j) = sigmoid(MAT_AT(m, i, j)) * (1 - sigmoid(MAT_AT(m, i, j)));
+void add_backward(Tensor* grad_output, Tensor* out) {
+    Tensor* a = out->ctx->saved_tensors[0];
+    Tensor* b = out->ctx->saved_tensors[1];
+
+    if (a->requires_grad) {
+        if (a->grad == NULL) {
+            a->grad = InitMatrix(a->data->rows, a->data->cols);
+        }
+        for (int i = 0; i < a->data->rows*a->data->cols; i++) {
+            a->grad->data[i] += grad_output->data->data[i];
         }
     }
-    return grad;
+    if (b->requires_grad) {
+        if (b->grad == NULL) {
+            b->grad = InitMatrix(b->data->rows, b->data->cols);
+        }
+        for (int i = 0; i < b->data->rows*b->data->cols; i++) {
+            b->grad->data[i] += grad_output->data->data[i];
+        }
+    }
+}
+
+Tensor* mul(Tensor* a, Tensor* b) {
+    Tensor* out = init_tensor(
+        MatrixDotProduct(a->data, b->data), 
+        a->requires_grad || b->requires_grad
+    );
+
+    if (out->requires_grad) {
+        out->ctx = (Context*)malloc(sizeof(Context));
+        Tensor* saved_tensors[2] = {a, b};
+        save_for_backward(out->ctx, saved_tensors, 2);
+        out->grad_fn = mul_backward;
+    }
+    return out;
+}
+
+void mul_backward(Tensor* grad_output, Tensor* out) {
+    Tensor* a = out->ctx->saved_tensors[0];
+    Tensor* b = out->ctx->saved_tensors[1];
+
+    if (a->requires_grad) {
+        if (a->grad == NULL) {
+            a->grad = InitMatrix(a->data->rows, a->data->cols);
+        }
+        for (int i = 0; i < a->data->rows*a->data->cols; i++) {
+            a->grad->data[i] += grad_output->data->data[i] * b->data->data[i];
+        }
+    }
+    if (b->requires_grad) {
+        if (b->grad == NULL) {
+            b->grad = InitMatrix(b->data->rows, b->data->cols);
+        }
+        for (int i = 0; i < b->data->rows*b->data->cols; i++) {
+            b->grad->data[i] += grad_output->data->data[i] * a->data->data[i];
+        }
+    }
 }

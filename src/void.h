@@ -1,40 +1,30 @@
 #include <flash.h>
+#include <stdbool.h>
 
-typedef struct Neuron {
-    Matrix* weights;
-    Matrix* bias;
-    
-    Matrix* (*forward)  (struct Neuron*, Matrix**);
-    void    (*backward) (struct Neuron*, Matrix*, Matrix*, Matrix*, double);
-} Neuron;
+typedef struct Tensor {
+    Matrix* data;
+    Matrix* grad;
+    bool requires_grad;
+    void (*grad_fn)(struct Tensor*, struct Tensor*);
+    struct Context* ctx;
+} Tensor;
 
-typedef struct NN {
-    Neuron* in;  // input layer
-    Neuron* hd;  // hidden layer 
-    Neuron* out; // output layer
+typedef struct Context {
+    Tensor** saved_tensors;
+    int num_saved;
+} Context;
 
-    Matrix* (*forward)  (struct NN*, Matrix**);
-    void    (*backward) (struct NN*, Matrix*, Matrix*, double);
-} NN;
+// Utility Functions
+Tensor* init_tensor(Matrix* data, bool requires_grad);
+void free_tensor(Tensor* t);
+void save_for_backward(Context* ctx, Tensor** tensors, int num_saved);
+void print_tensor(Tensor* t);
+void print_tensor_grad(Tensor* t);
+void tensor_backward(Tensor* t, Matrix* grad);
 
-// Neuron Function
-Neuron* InitNeuron(int in_dim, int out_dim, bool bias);
-void PrintNeuron(Neuron* n);
-void FreeNeuron(Neuron* n);
-Matrix* NeuronForward(Neuron*, Matrix** in);
-void NeuronBackward(Neuron*, Matrix* in, Matrix* pred, Matrix* targ, double lr);
+// Operations
+Tensor* add(Tensor* a, Tensor* b);
+void add_backward(Tensor* grad_out, Tensor* out);
 
-// Neural Network (NN) Functions
-NN* InitNN(int in_dim, int hidden_dim, int out_dim, bool bias);
-void FreeNN(NN* net);
-Matrix* NNForward(NN* net, Matrix** in);
-void NNBackward(NN* net, Matrix* in, Matrix* targ, double lr);
-
-// Loss Functions
-double MSE(Matrix* y_pred, Matrix* y_true);
-Matrix* MSEBackward(Matrix* y_pred, Matrix* y_true);
-
-// Activation Functions 
-double sigmoid(double x);
-Matrix* MatrixSigmoid(Matrix* m);
-Matrix* MatrixSigmoidBackward(Matrix* m);
+Tensor* mul(Tensor* a, Tensor* b);
+void mul_backward(Tensor* grad_out, Tensor* out);
