@@ -1,13 +1,11 @@
 from tensor import *
+from layers import *
 
+import numpy as np
 
 if __name__=="__main__":
-    a = randn_tensor((3, 4), True)
-    b = randn_tensor((3, 4), True)
-    c = a @ b.T
-    
-    print(c)
+    lin = Linear(3, 4)
+    x = randn((4, 3))
+    out = lin(x)
 
-    c.backward()
-    print(a.grad)
-    print(b.grad)
+    print(out)

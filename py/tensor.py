@@ -3,10 +3,14 @@ import numpy as np
 # Helper Functions
 def is_tensor(obj): return isinstance(obj, Tensor)
 def to_tensor(obj): return Tensor(obj) if not is_tensor(obj) else obj
-def rand_tensor(shape, requires_grad=False):
+def rand(shape, requires_grad=False):
     return Tensor(np.random.rand(*shape), requires_grad=requires_grad)
-def randn_tensor(shape, requires_grad=False):
+def randn(shape, requires_grad=False):
     return Tensor(np.random.randn(*shape), requires_grad=requires_grad)
+def zeros(shape, requires_grad=False):
+    return Tensor(np.zeros(shape), requires_grad=requires_grad)
+def ones(shape, requires_grad=False):
+    return Tensor(np.ones(shape), requires_grad=requires_grad)
 
 class Context:
     def save_for_backward(self, *tensors):
@@ -74,23 +78,27 @@ class Tensor:
 
     def sum(self, dim=None, keepdim=False): return Sum.apply(self, dim, keepdim)
     def mean(self, dim=None, keepdim=False): return Mean.apply(self, dim, keepdim)
-    
-    def relu(self): return Relu.apply(self)
 
-    def __neg__(self):        return Neg.apply(self)
-    def __add__(self, other): return Add.apply(self, to_tensor(other))
-    def __sub__(self, other): return Add.apply(self, -to_tensor(other)) 
-    def __mul__(self, other): return Mul.apply(self, to_tensor(other))
-    def __truediv__(self, other): return Div.apply(self, to_tensor(other))
-    def __pow__(self, other): return Pow.apply(self, to_tensor(other))
-    def __matmul__(self, other): return Matmul.apply(self, to_tensor(other))
+    def __neg__(self):              return Neg.apply(self)
+    def __add__(self, other):       return Add.apply(self, to_tensor(other))
+    def __sub__(self, other):       return self + -other 
+    def __mul__(self, other):       return Mul.apply(self, to_tensor(other))
+    def __truediv__(self, other):   return Div.apply(self, to_tensor(other))
+    def __pow__(self, other):       return Pow.apply(self, to_tensor(other))
+    def __matmul__(self, other):    return Matmul.apply(self, to_tensor(other))
 
-    def __radd__(self, other): return Add.apply(self, to_tensor(other))
-    def __rsub__(self, other): return Add.apply(self, -to_tensor(other)) 
-    def __rmul__(self, other): return Mul.apply(self, to_tensor(other))
-    def __rtruediv__(self, other): return Div.apply(self, to_tensor(other))
-    def __rpow__(self, other): return Pow.apply(self, to_tensor(other))
- 
+    def __radd__(self, other):      return Add.apply(to_tensor(other), self)
+    def __rsub__(self, other):      return other + -self
+    def __rmul__(self, other):      return Mul.apply(to_tensor(other), self)
+    def __rtruediv__(self, other):  return Div.apply(to_tensor(other), self)
+    def __rpow__(self, other):      return Pow.apply(to_tensor(other), self)
+    def __rmatmul__(self, other):   return Matmul(to_tensor(other), self)
+
+    def __iadd__(self, other):      return Add.apply(self, to_tensor(other))
+    def __isub__(self, other):      return self + -other
+    def __imul__(self, other):      return Mul.apply(self, to_tensor(other))
+    def __itruediv__(self, other):  return Div.apply(self, to_tensor(other))
+
     def log(self): return Log.apply(self)
     def sqrt(self): return Sqrt.apply(self)
     def sin(self): return Sin.apply(self)
@@ -98,6 +106,8 @@ class Tensor:
     def exp(self): return Exp.apply(self)
     def tan(self): return self.sin() / self.cos()
 
+    def relu(self): return Relu.apply(self)
+    
     def transpose(self, axes=None): return Transpose.apply(self, axes)
     @property 
     def T(self): return self.transpose()
