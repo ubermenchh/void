@@ -4,8 +4,7 @@ from layers import *
 import numpy as np
 
 if __name__=="__main__":
-    lin = Linear(3, 4)
-    x = randn((4, 3))
-    out = lin(x)
-
-    print(out)
+    a = Tensor.randn((3, 4))
+    print(a)
+    print(a.max(dim=1))
+    print(a.min(dim=1))

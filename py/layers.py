@@ -41,3 +41,9 @@ class Linear(Module):
         if self.bias:
             out += self.b 
         return out
+
+class ReLU(Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, x):
+        return x.relu()

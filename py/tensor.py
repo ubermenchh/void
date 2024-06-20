@@ -3,14 +3,7 @@ import numpy as np
 # Helper Functions
 def is_tensor(obj): return isinstance(obj, Tensor)
 def to_tensor(obj): return Tensor(obj) if not is_tensor(obj) else obj
-def rand(shape, requires_grad=False):
-    return Tensor(np.random.rand(*shape), requires_grad=requires_grad)
-def randn(shape, requires_grad=False):
-    return Tensor(np.random.randn(*shape), requires_grad=requires_grad)
-def zeros(shape, requires_grad=False):
-    return Tensor(np.zeros(shape), requires_grad=requires_grad)
-def ones(shape, requires_grad=False):
-    return Tensor(np.ones(shape), requires_grad=requires_grad)
+
 
 class Context:
     def save_for_backward(self, *tensors):
@@ -54,6 +47,9 @@ class Tensor:
         rounded_data = np.around(self.data, decimals=5)
         return f"""Tensor(\n{rounded_data}, requires_grad={self.requires_grad}\n)"""
 
+    def __getitem__(self, idx): return Slice.apply(self, idx)
+    def __setitem__(self, idx, value): self.data[idx] = value
+
     def set_grad_fn(self, grad_fn):
         self._grad_fn = grad_fn 
 
@@ -72,12 +68,44 @@ class Tensor:
                 if t.requires_grad:
                     t.backward(g)
     
-    def shape(self):
-        return self.data.shape
-
+    @staticmethod 
+    def randn(shape, requires_grad=False):
+        return Tensor(np.random.randn(*shape), requires_grad=requires_grad)
+    @staticmethod 
+    def rand(shape, requires_grad=False):
+        return Tensor(np.random.rand(*shape), requires_grad=requires_grad)
+    @staticmethod
+    def zeros(shape, requires_grad=False):
+        return Tensor(np.zeros(shape), requires_grad=requires_grad)
+    @staticmethod
+    def ones(shape, requires_grad=False):
+        return Tensor(np.ones(shape), requires_grad=requires_grad)
+    @staticmethod 
+    def eye(size, requires_grad=False):
+        return Tensor(np.eye(size), requires_grad=requires_grad)
+    @staticmethod
+    def randn_like(tensor, requires_grad=False):
+        assert(isinstance(tensor, Tensor))
+        return Tensor(np.random.randn(*tensor.shape), requires_grad=requires_grad)
+    @staticmethod 
+    def rand_like(tensor, requires_grad=False):
+        assert(isinstance(tensor, Tensor))
+        return Tensor(np.random.rand(*tensor.shape), requires_grad=requires_grad)
+    @staticmethod 
+    def zeros_like(tensor, requires_grad=False):
+        assert(isinstance(tensor, Tensor))
+        return Tensor(np.zeros_like(tensor), requires_grad=requires_grad)
+    @staticmethod 
+    def ones_like(tensor, requires_grad=False):
+        assert(isinstance(tensor, Tensor))
+        return Tensor(np.ones_like(tensor), requires_grad=requires_grad)
 
     def sum(self, dim=None, keepdim=False): return Sum.apply(self, dim, keepdim)
+    def max(self, dim=None, keepdim=False): return Max.apply(self, dim, keepdim)
+    def min(self, dim=None, keepdim=False): return Min.apply(self, dim, keepdim)
     def mean(self, dim=None, keepdim=False): return Mean.apply(self, dim, keepdim)
+    def var(self, dim=None, keepdim=False): return Var.apply(self, dim, keepdim)
+    def std(self, dim=None, keepdim=False): return self.var(dim, keepdim).sqrt()
 
     def __neg__(self):              return Neg.apply(self)
     def __add__(self, other):       return Add.apply(self, to_tensor(other))
@@ -108,9 +136,24 @@ class Tensor:
 
     def relu(self): return Relu.apply(self)
     
+    @property
+    def shape(self): return self.data.shape
+    @property 
+    def dtype(self): return self.data.dtype
+
     def transpose(self, axes=None): return Transpose.apply(self, axes)
     @property 
     def T(self): return self.transpose()
+    def detach(self): self.requires_grad = False
+    def reshape(self, *shape): return Reshape.apply(self, *shape)
+    def concat(self, others, dim=0):
+        if not isinstance(others, (list, tuple)):
+            others = [others]
+        return Concat.apply([self] + others, dim)
+    def stack(self, others, dim=0):
+        if not isinstance(others, (list, tuple)):
+            others = [others]
+        return Stack.apply([self] + others, dim)
 
 # Tensor Operations
 class Neg(Function):
@@ -181,6 +224,50 @@ class Sum(Function):
             return grad_a 
         return None
 
+class Max(Function):
+    @staticmethod 
+    def forward(ctx, a, dim, keepdim):
+        ctx.save_for_backward(a, dim, keepdim)
+        _data = a.data.max(axis=dim, keepdims=keepdim)
+        return Tensor(_data, requires_grad=a.requires_grad)
+
+    @staticmethod 
+    def backward(ctx, grad_output):
+        a, dim, keepdim = ctx.saved_tensors
+        if not a.requires_grad:
+            return None 
+        
+        mask = (a.data == np.max(a.data, axis=dim, keepdims=keepdim))
+        if not keepdim and dim is not None:
+            grad_output = np.expand_dims(grad_output, axis=dim)
+
+        grad_a = mask * grad_output
+        if not keepdim and dim is not None:
+            grad_a = np.sum(grad_a, axis=dim, keepdims=keepdim)
+        return grad_a
+
+class Min(Function):
+    @staticmethod 
+    def forward(ctx, a, dim, keepdim):
+        ctx.save_for_backward(a, dim, keepdim)
+        _data = a.data.min(axis=dim, keepdims=keepdim)
+        return Tensor(_data, requires_grad=a.requires_grad)
+
+    @staticmethod 
+    def backward(ctx, grad_output):
+        a, dim, keepdim = ctx.saved_tensors
+        if not a.requires_grad:
+            return None 
+        
+        mask = (a.data == np.min(a.data, axis=dim, keepdims=keepdim))
+        if not keepdim and dim is not None:
+            grad_output = np.expand_dims(grad_output, axis=dim)
+
+        grad_a = mask * grad_output
+        if not keepdim and dim is not None:
+            grad_a = np.sum(grad_a, axis=dim, keepdims=keepdim)
+        return grad_a
+
 class Pow(Function):
     @staticmethod
     def forward(ctx, a, b):
@@ -213,13 +300,13 @@ class Sqrt(Function):
     @staticmethod
     def forward(ctx, a):
         ctx.save_for_backward(a)
-        return Tensor(np.sqrt(a), requires_grad=a.requires_grad)
+        return Tensor(np.sqrt(a.data), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
         a, = ctx.saved_tensors
         if a.requires_grad:
-            grad_a = (1. / 2 * np.sqrt(a.data)) * grad_output
+            grad_a = (1. / 2 * a.data) * grad_output
             return grad_a 
         return None
 
@@ -286,6 +373,22 @@ class Mean(Function):
             return grad_a
         return None
 
+class Var(Function):
+    @staticmethod 
+    def forward(ctx, a, dim, keepdim):
+        ctx.save_for_backward(a, dim, keepdim)
+        return Tensor(a.data.var(axis=dim, keepdims=keepdim), requires_grad=a.requires_grad)
+
+    @staticmethod 
+    def backward(ctx, grad_output):
+        a, dim, keepdim = ctx.saved_tensors 
+
+        if a.requires_grad:
+            grad_a = np.ones_like(a.data) * grad_output 
+            grad_a = grad_a * 2 * (a.data - a.data.mean(axis=dim, keepdims=True)) / np.prod(np.array(a.shape)[dim])
+            return grad_a 
+        return None
+
 class Relu(Function):
     @staticmethod 
     def forward(ctx, a):
@@ -326,3 +429,77 @@ class Transpose(Function):
             grad_a = np.transpose(grad_output, *axes)
             return grad_a 
         return None
+
+class Slice(Function):
+    @staticmethod 
+    def forward(ctx, a, idx):
+        ctx.save_for_backward(a, idx)
+        return Tensor(a.data[idx], requires_grad=a.requires_grad)
+
+    @staticmethod 
+    def backward(ctx, grad_output):
+        a, idx = ctx.saved_tensors 
+        if a.requires_grad:
+            grad_a = np.zeros_like(a.data)
+            grad_a[idx] = grad_output 
+            return grad_a 
+        return None
+
+class Reshape(Function):
+    @staticmethod
+    def forward(ctx, a, *shape):
+        ctx.save_for_backward(a, shape)
+        return Tensor(a.data.reshape(shape), requires_grad=a.requires_grad)
+
+    @staticmethod 
+    def backward(ctx, grad_output):
+        a, shape = ctx.saved_tensors 
+        if a.requires_grad:
+            grad_a = grad_output.reshape(shape)
+            return grad_a 
+        return None
+
+class Concat(Function):
+    @staticmethod 
+    def forward(ctx, tensors, dim=0):
+        ctx.save_for_backward(tensors, dim)
+        new_data = np.concatenate([t.data for t in tensors], axis=dim)
+        requires_grad = any(t.requires_grad for t in tensors)
+        return Tensor(new_data, requires_grad=requires_grad)
+
+    @staticmethod 
+    def backward(ctx, grad_output):
+        tensors, dim = ctx.saved_tensors
+        grad_tensors = []
+        start = 0
+        for tensor in tensors:
+            shape = tensor.data.shape
+            size = shape[dim]
+            grad_tensor = None
+            if tensor.requires_grad:
+                grad_tensor = grad_output.data.take(indices=np.arange(start, start + size), axis=dim)
+                if len(shape) > grad_tensor.ndim:
+                    grad_tensor = np.expand_dims(grad_tensor, axis=-1)
+            grad_tensors.append(grad_tensor)
+            start += size
+        return tuple(grad_tensors) 
+
+class Stack(Function):
+    @staticmethod
+    def forward(ctx, tensors, dim=0):
+        ctx.save_for_backward(tensors, dim)
+        new_data = np.stack([t.data for t in tensors], axis=dim)
+        requires_grad = any(t.requires_grad for t in tensors)
+        return Tensor(new_data, requires_grad=requires_grad)
+
+    @staticmethod 
+    def backward(ctx, grad_output):
+        tensors, dim = ctx.saved_tensors 
+        grad_tensors = []
+        for i, t in enumerate(tensors):
+            if t.requires_grad:
+                grad_tensor = np.take(grad_output.data, i, axis=dim)
+            else:
+                grad_tensor = True 
+            grad_tensors.append(grad_tensor)
+        return tuple(grad_tensors)
