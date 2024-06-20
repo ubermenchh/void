@@ -69,36 +69,50 @@ class Tensor:
                     t.backward(g)
     
     @staticmethod 
-    def randn(shape, requires_grad=False):
-        return Tensor(np.random.randn(*shape), requires_grad=requires_grad)
+    def randn(shape, requires_grad=False, **kwargs):
+        return Tensor(np.random.randn(*shape, **kwargs), requires_grad=requires_grad)
     @staticmethod 
-    def rand(shape, requires_grad=False):
-        return Tensor(np.random.rand(*shape), requires_grad=requires_grad)
+    def rand(shape, requires_grad=False, **kwargs):
+        return Tensor(np.random.rand(*shape, **kwargs), requires_grad=requires_grad)
     @staticmethod
-    def zeros(shape, requires_grad=False):
-        return Tensor(np.zeros(shape), requires_grad=requires_grad)
+    def zeros(shape, requires_grad=False, **kwargs):
+        return Tensor(np.zeros(shape, **kwargs), requires_grad=requires_grad)
     @staticmethod
-    def ones(shape, requires_grad=False):
-        return Tensor(np.ones(shape), requires_grad=requires_grad)
+    def ones(shape, requires_grad=False, **kwargs):
+        return Tensor(np.ones(shape, **kwargs), requires_grad=requires_grad)
     @staticmethod 
-    def eye(size, requires_grad=False):
-        return Tensor(np.eye(size), requires_grad=requires_grad)
+    def eye(size, requires_grad=False, **kwargs):
+        return Tensor(np.eye(size, **kwargs), requires_grad=requires_grad)
     @staticmethod
-    def randn_like(tensor, requires_grad=False):
+    def randn_like(tensor, requires_grad=False, **kwargs):
         assert(isinstance(tensor, Tensor))
-        return Tensor(np.random.randn(*tensor.shape), requires_grad=requires_grad)
+        return Tensor(np.random.randn(*tensor.shape, **kwargs), requires_grad=requires_grad)
     @staticmethod 
-    def rand_like(tensor, requires_grad=False):
+    def rand_like(tensor, requires_grad=False, **kwargs):
         assert(isinstance(tensor, Tensor))
-        return Tensor(np.random.rand(*tensor.shape), requires_grad=requires_grad)
+        return Tensor(np.random.rand(*tensor.shape, **kwargs), requires_grad=requires_grad)
     @staticmethod 
-    def zeros_like(tensor, requires_grad=False):
+    def zeros_like(tensor, requires_grad=False, **kwargs):
         assert(isinstance(tensor, Tensor))
-        return Tensor(np.zeros_like(tensor), requires_grad=requires_grad)
+        return Tensor(np.zeros_like(tensor.data, **kwargs), requires_grad=requires_grad)
     @staticmethod 
-    def ones_like(tensor, requires_grad=False):
+    def ones_like(tensor, requires_grad=False, **kwargs):
         assert(isinstance(tensor, Tensor))
-        return Tensor(np.ones_like(tensor), requires_grad=requires_grad)
+        return Tensor(np.ones_like(tensor.data, **kwargs), requires_grad=requires_grad)
+    @staticmethod 
+    def full(shape, fill_value, requires_grad=False, **kwargs):
+        return Tensor(np.full(shape, fill_value, **kwargs), requires_grad=requires_grad)
+    @staticmethod 
+    def full_like(tensor, fill_value, requires_grad=False, **kwargs):
+        assert(isinstance(tensor, Tensor))
+        return Tensor(np.full_like(tensor.data, fill_value, **kwargs), requires_grad=requires_grad)
+    @staticmethod 
+    def tri(size, requires_grad=False, **kwargs):
+        return Tensor(np.tri(N=size, **kwargs), requires_grad=requires_grad)
+
+    def triu(self, diag=0, **kwargs): return Tensor(np.triu(self.data, k=diag, **kwargs), requires_grad=self.requires_grad)
+    def tril(self, diag=0, **kwargs): return Tensor(np.tril(self.data, k=diag, **kwargs), requires_grad=self.requires_grad)
+
 
     def sum(self, dim=None, keepdim=False): return Sum.apply(self, dim, keepdim)
     def max(self, dim=None, keepdim=False): return Max.apply(self, dim, keepdim)
@@ -127,6 +141,13 @@ class Tensor:
     def __imul__(self, other):      return Mul.apply(self, to_tensor(other))
     def __itruediv__(self, other):  return Div.apply(self, to_tensor(other))
 
+    def __lt__(self, other): return self.data < other.data
+    def __gt__(self, other): return self.data > other.data 
+    def __ge__(self, other): return self.data >= other.data 
+    def __le__(self, other): return self.data <= other.data 
+    def __ne__(self, other): return self.data != other.data 
+    def __eq__(self, other): return self.data == other.data
+
     def log(self): return Log.apply(self)
     def sqrt(self): return Sqrt.apply(self)
     def sin(self): return Sin.apply(self)
@@ -154,6 +175,9 @@ class Tensor:
         if not isinstance(others, (list, tuple)):
             others = [others]
         return Stack.apply([self] + others, dim)
+    def masked_fill(self, condition, value):
+        return MaskedFill.apply(self, condition, value)
+
 
 # Tensor Operations
 class Neg(Function):
@@ -381,7 +405,7 @@ class Var(Function):
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, dim, keepdim = ctx.saved_tensors 
+        a, dim, _ = ctx.saved_tensors 
 
         if a.requires_grad:
             grad_a = np.ones_like(a.data) * grad_output 
@@ -503,3 +527,18 @@ class Stack(Function):
                 grad_tensor = True 
             grad_tensors.append(grad_tensor)
         return tuple(grad_tensors)
+
+class MaskedFill(Function):
+    @staticmethod 
+    def forward(ctx, a, condition, value):
+        ctx.save_for_backward(a, condition, value)
+        data = np.where(condition, a.data, value)
+        return Tensor(data, requires_grad=a.requires_grad)
+
+    @staticmethod 
+    def backward(ctx, grad_output):
+        a, condition, value = ctx.saved_tensors 
+        if a.requires_grad:
+            grad_a = np.where(condition, grad_output, 0)
+            return grad_a 
+        return None
