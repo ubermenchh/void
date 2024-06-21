@@ -1,7 +1,6 @@
 #include <flash.h>
 #include <stdbool.h>
 
-#define INIT_CONTEXT (Context*)malloc(sizeof(Context))
 
 typedef struct Tensor {
     Matrix* data;
@@ -13,18 +12,20 @@ typedef struct Tensor {
 
 typedef struct Context {
     Tensor** saved_tensors;
-    int num_saved;
+    int num_saved_tensors;
+    double* saved_scalars; 
+    int num_saved_scalars;
 } Context;
 
 // Utility Functions
 Tensor* init_tensor(Matrix* data, bool requires_grad);
 void free_tensor(Tensor* t);
-void save_for_backward(Context* ctx, Tensor** tensors, int num_saved);
+void save_for_backward(Context* ctx, Tensor** tensors, int num_tensors, double* scalars, int num_scalars);
 void print_tensor(Tensor* t);
 void print_tensor_grad(Tensor* t);
 void tensor_backward(Tensor* t, Matrix* grad);
 
-// Initialization
+// Tensor Initialization
 Tensor* tensor_rand(int rows, int cols, bool requires_grad, int seed);
 Tensor* tensor_randn(int rows, int cols, bool requires_grad, int seed);
 Tensor* tensor_ones(int rows, int cols, bool requires_grad);
@@ -35,7 +36,7 @@ Tensor* tensor_zeros_like(Tensor* t, bool requires_grad);
 Tensor* tensor_full(int rows, int cols, double value, bool requires_grad);
 Tensor* tensor_full_like(Tensor* t, double value, bool requires_grad);
 
-// Operations
+// Tensor Operations
 Tensor* tensor_add(Tensor* a, Tensor* b);
 void add_backward(Tensor* grad_out, Tensor* out);
 
@@ -67,7 +68,6 @@ Tensor* tensor_log(Tensor* input);
 void log_backward(Tensor* grad_output, Tensor* out);
 
 Tensor* tensor_sqrt(Tensor* input);
-void sqrt_backward(Tensor* grad_output, Tensor* out);
 
 Tensor* tensor_sin(Tensor* input);
 void sin_backward(Tensor* grad_output, Tensor* out);
@@ -81,8 +81,10 @@ void exp_backward(Tensor* grad_output, Tensor* out);
 Tensor* tensor_mean(Tensor* input, int dim);
 void mean_backward(Tensor* grad_output, Tensor* out);
 
+Tensor* tensor_std(Tensor* input, int dim);
+void std_backward(Tensor* grad_output, Tensor* out);
+
 Tensor* tensor_var(Tensor* input, int dim);
-void var_backward(Tensor* grad_output, Tensor* out);
 
 Tensor* tensor_transpose(Tensor* input);
 void transpose_backward(Tensor* grad_output, Tensor* out);
