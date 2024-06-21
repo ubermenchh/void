@@ -1,6 +1,8 @@
 #include <flash.h>
 #include <stdbool.h>
 
+#define INIT_CONTEXT (Context*)malloc(sizeof(Context))
+
 typedef struct Tensor {
     Matrix* data;
     Matrix* grad;
@@ -26,5 +28,14 @@ void tensor_backward(Tensor* t, Matrix* grad);
 Tensor* add(Tensor* a, Tensor* b);
 void add_backward(Tensor* grad_out, Tensor* out);
 
-Tensor* mul(Tensor* a, Tensor* b);
+Tensor* multiply(Tensor* a, Tensor* b);
 void mul_backward(Tensor* grad_out, Tensor* out);
+
+Tensor* sum(Tensor* a);
+void sum_backward(Tensor* grad_out, Tensor* out);
+
+Tensor* negate(Tensor* a);
+void neg_backward(Tensor* grad_out, Tensor* out);
+
+Tensor* divide(Tensor* a, Tensor* b);
+void div_backward(Tensor* grad_out, Tensor* out);
