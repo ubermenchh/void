@@ -24,18 +24,74 @@ void print_tensor(Tensor* t);
 void print_tensor_grad(Tensor* t);
 void tensor_backward(Tensor* t, Matrix* grad);
 
+// Initialization
+Tensor* tensor_rand(int rows, int cols, bool requires_grad, int seed);
+Tensor* tensor_randn(int rows, int cols, bool requires_grad, int seed);
+Tensor* tensor_ones(int rows, int cols, bool requires_grad);
+Tensor* tensor_zeros(int rows, int cols, bool requires_grad);
+Tensor* tensor_eye(int size, bool requires_grad);
+Tensor* tensor_ones_like(Tensor* t, bool requires_grad);
+Tensor* tensor_zeros_like(Tensor* t, bool requires_grad);
+Tensor* tensor_full(int rows, int cols, double value, bool requires_grad);
+Tensor* tensor_full_like(Tensor* t, double value, bool requires_grad);
+
 // Operations
-Tensor* add(Tensor* a, Tensor* b);
+Tensor* tensor_add(Tensor* a, Tensor* b);
 void add_backward(Tensor* grad_out, Tensor* out);
 
-Tensor* multiply(Tensor* a, Tensor* b);
+Tensor* tensor_multiply(Tensor* a, Tensor* b);
 void mul_backward(Tensor* grad_out, Tensor* out);
 
-Tensor* sum(Tensor* a);
+Tensor* tensor_sum(Tensor* a);
 void sum_backward(Tensor* grad_out, Tensor* out);
 
-Tensor* negate(Tensor* a);
+Tensor* tensor_negate(Tensor* a);
 void neg_backward(Tensor* grad_out, Tensor* out);
 
-Tensor* divide(Tensor* a, Tensor* b);
+Tensor* tensor_divide(Tensor* a, Tensor* b);
 void div_backward(Tensor* grad_out, Tensor* out);
+
+Tensor* tensor_matmul(Tensor* a, Tensor* b);
+void matmul_backward(Tensor* grad_out, Tensor* out);
+
+Tensor* tensor_max(Tensor* input, int dim);
+void max_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_min(Tensor* input, int dim);
+void min_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_pow(Tensor* input, double power);
+void pow_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_log(Tensor* input);
+void log_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_sqrt(Tensor* input);
+void sqrt_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_sin(Tensor* input);
+void sin_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_cos(Tensor* input);
+void cos_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_exp(Tensor* input);
+void exp_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_mean(Tensor* input, int dim);
+void mean_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_var(Tensor* input, int dim);
+void var_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_transpose(Tensor* input);
+void transpose_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_reshape(Tensor* input, int rows, int cols);
+void reshape_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_concat(Tensor* a, Tensor* b, int dim);
+void concat_backward(Tensor* grad_output, Tensor* out);
+
+Tensor* tensor_relu(Tensor* input);
+void relu_backward(Tensor* grad_output, Tensor* out);
