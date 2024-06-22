@@ -149,6 +149,10 @@ void print_tensor_grad(Tensor* t) {
     } 
 }
 
+void tensor_shape(Tensor* t) {
+    printf("Shape: (%d, %d)\n", t->data->rows, t->data->cols);
+}
+
 void tensor_backward(Tensor* t, Matrix* grad) {
     if (grad == NULL) {
         grad = MatrixOnesLike(t->data);
@@ -876,6 +880,45 @@ void concat_backward(Tensor* grad_output, Tensor* out) {
         tensor_backward(b, grad_b);
         FreeMatrix(grad_b);
     }
+    free_context(out->ctx);
+    out->ctx = NULL;
+}
+
+Tensor* tensor_relu(Tensor* input) {
+    // relu(in) = max(0, in)
+    int rows = input->data->rows;
+    int cols = input->data->cols;
+    Tensor* out = init_tensor(InitMatrix(rows, cols), input->requires_grad);
+    
+    for (int i = 0; i < rows * cols; i++) {
+        out->data->data[i] = fmax(input->data->data[i], 0); 
+    }
+
+    if (out->requires_grad) {
+        out->ctx = init_context();
+        out->grad_fn = relu_backward;
+        Tensor* saved_tensors[1] = {input};
+        save_for_backward(out->ctx, saved_tensors, 1, NULL, 0);
+    }
+
+    return out;
+}
+
+void relu_backward(Tensor* grad_output, Tensor* out) {
+    Tensor* input = out->ctx->saved_tensors[0];
+
+    if (input->requires_grad) {
+        int size = input->data->rows * input->data->cols;
+        Matrix* input_grad = InitMatrix(input->data->rows, input->data->cols);
+
+        for (int i = 0; i < size; i++) {
+            input_grad->data[i] = (input->data->data[i] > 0) ? grad_output->data->data[i] : 0;  
+        }
+
+        tensor_backward(input, input_grad);
+        FreeMatrix(input_grad);
+    }
+
     free_context(out->ctx);
     out->ctx = NULL;
 }

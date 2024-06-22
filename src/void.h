@@ -24,6 +24,7 @@ void save_for_backward(Context* ctx, Tensor** tensors, int num_tensors, double* 
 void print_tensor(Tensor* t);
 void print_tensor_grad(Tensor* t);
 void tensor_backward(Tensor* t, Matrix* grad);
+void tensor_shape(Tensor* t);
 
 // Tensor Initialization
 Tensor* tensor_rand(int rows, int cols, bool requires_grad, int seed);
@@ -97,3 +98,17 @@ void concat_backward(Tensor* grad_output, Tensor* out);
 
 Tensor* tensor_relu(Tensor* input);
 void relu_backward(Tensor* grad_output, Tensor* out);
+
+// Layers
+typedef struct {
+    int in_dim;
+    int out_dim;
+    bool has_bias;
+
+    Tensor* weight;
+    Tensor* bias;
+} Linear;
+
+Linear* init_linear(int in_dim, int out_dim, bool has_bias);
+void free_linear(Linear* lin);
+Tensor* linear_forward(Linear* lin, Tensor* input);
