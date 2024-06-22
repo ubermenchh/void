@@ -52,6 +52,9 @@ class Tensor:
 
     def set_grad_fn(self, grad_fn):
         self._grad_fn = grad_fn 
+    
+    def zero_grad(self):
+        self.grad = np.zeros_like(self.data)
 
     def backward(self, grad=None):
         if grad is None:
@@ -68,6 +71,10 @@ class Tensor:
                 if t.requires_grad:
                     t.backward(g)
     
+    def repeat(self, *sizes):
+        new_data = np.tile(self.data, sizes)
+        return Tensor(new_data, requires_grad=self.requires_grad)
+
     @staticmethod 
     def randn(shape, requires_grad=False, **kwargs):
         return Tensor(np.random.randn(*shape, **kwargs), requires_grad=requires_grad)
@@ -188,7 +195,7 @@ class Neg(Function):
     
     @staticmethod 
     def backward(ctx, grad_output):
-        a = ctx.saved_tensors 
+        a, = ctx.saved_tensors 
         return -grad_output if a.requires_grad else None
 
 class Add(Function):
@@ -203,6 +210,12 @@ class Add(Function):
         a, b = ctx.saved_tensors
         grad_a = grad_output if a.requires_grad else None 
         grad_b = grad_output if b.requires_grad else None 
+
+        if grad_a is not None and grad_a.shape != a.shape:
+            grad_a = grad_a.sum(axis=0, keepdims=True)
+        if grad_b is not None and grad_b.shape != b.shape:
+            grad_b = grad_b.sum(axis=0, keepdims=True)
+
         return grad_a, grad_b
 
 class Mul(Function):
@@ -537,7 +550,7 @@ class MaskedFill(Function):
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, condition, value = ctx.saved_tensors 
+        a, condition, _ = ctx.saved_tensors 
         if a.requires_grad:
             grad_a = np.where(condition, grad_output, 0)
             return grad_a 

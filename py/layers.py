@@ -32,14 +32,14 @@ class Module:
 class Linear(Module):
     def __init__(self, in_dim, out_dim, bias=True):
         super().__init__()
-        self.w = Tensor.randn((in_dim, out_dim), requires_grad=True) / np.sqrt(in_dim)
-        self.b = Tensor.zeros(out_dim, requires_grad=True)
+        self.w = Tensor.randn((out_dim, in_dim), requires_grad=True) / np.sqrt(in_dim)
+        self.b = Tensor.zeros((out_dim, 1), requires_grad=True) if bias else None
         self.bias = bias 
 
     def forward(self, x):
-        out = x @ self.w 
+        out = x @ self.w.T
         if self.bias:
-            out += self.b 
+            out += self.b.T.repeat(x.shape[0], 1) 
         return out
 
 class ReLU(Module):
@@ -94,3 +94,34 @@ class Softmax(Module):
         x = x.exp()
         out = x / x.sum(dim=dim, keepdim=True)
         return out
+
+class MeanSquaredError(Module):
+    def __init__(self): super().__init__()
+    def __call__(self, y_pred, y_true):
+        return self.forward(y_pred, y_true)
+
+    def forward(self, y_pred, y_true):
+        out = (y_pred - y_true)**2 
+        return out.mean()
+
+class Optim:
+    def __init__(self): pass 
+    def step(self):
+        return NotImplementedError("`step` method not implemented.")
+    def zero_grad(self):
+        for param in self.params:
+            param.zero_grad()
+
+class SGD(Optim):
+    def __init__(self, params, lr=1e-3, reg=0):
+        self.params = params 
+        self.lr = lr 
+        self.reg = reg 
+
+    def step(self):
+        for param in self.params:
+            param.data -= self.lr * (param.grad + self.reg * param.data)
+
+    def zero_grad(self):
+        for param  in self.params:
+            param.zero_grad()
