@@ -817,3 +817,65 @@ void reshape_backward(Tensor* grad_output, Tensor* out) {
     free_context(out->ctx);
     out->ctx = NULL;
 }
+
+Tensor* tensor_concat(Tensor* a, Tensor* b, int dim) {
+    Tensor* out = init_tensor(MatrixConcat(a->data, b->data, dim), a->requires_grad || b->requires_grad);
+
+    if (out->requires_grad) {
+        out->ctx = init_context();
+        out->grad_fn = concat_backward;
+        Tensor* saved_tensors[2] = {a, b};
+        double saved_scalars[1] = {dim};
+        save_for_backward(out->ctx, saved_tensors, 2, saved_scalars, 1);
+    }
+    return out;
+}
+
+void concat_backward(Tensor* grad_output, Tensor* out) {
+    Tensor* a = out->ctx->saved_tensors[0];
+    Tensor* b = out->ctx->saved_tensors[1];
+    int dim = out->ctx->saved_scalars[0];
+
+    if (a->requires_grad) {
+        Matrix* grad_a = InitMatrix(a->data->rows, a->data->cols);
+        if (dim == 0) { 
+            // split along rows
+            for (int i = 0; i < a->data->rows; i++) {
+                for (int j = 0; j < a->data->cols; j++) {
+                    MAT_AT(grad_a, i, j) = MAT_AT(grad_output->data, i, j);
+                }
+            }
+        } else if (dim == 1) {
+            // split along columns
+            for (int i = 0; i < a->data->rows; i++) {
+                for (int j = 0; j < a->data->cols; j++) {
+                    MAT_AT(grad_a, i, j) = MAT_AT(grad_output->data, i, j);
+                }
+            }
+        }
+        tensor_backward(a, grad_a);
+        FreeMatrix(grad_a);
+    }
+    if (b->requires_grad) {
+        Matrix* grad_b = InitMatrix(b->data->rows, b->data->cols);
+        if (dim == 0) {
+            // split along rows
+            for (int i = 0; i < b->data->rows; i++) {
+                for (int j = 0; j < b->data->cols; j++) {
+                    MAT_AT(grad_b, i, j) = MAT_AT(grad_output->data, (i + a->data->rows), j);
+                }
+            }
+        } else if (dim == 1) {
+            // split along columns
+            for (int i = 0; i < b->data->rows; i++) {
+                for (int j = 0; j < b->data->cols; j++) {
+                    MAT_AT(grad_b, i, j) = MAT_AT(grad_output->data, i, (j + a->data->cols));
+                }
+            }
+        }
+        tensor_backward(b, grad_b);
+        FreeMatrix(grad_b);
+    }
+    free_context(out->ctx);
+    out->ctx = NULL;
+}
