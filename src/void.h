@@ -36,10 +36,13 @@ Tensor* tensor_ones_like(Tensor* t, bool requires_grad);
 Tensor* tensor_zeros_like(Tensor* t, bool requires_grad);
 Tensor* tensor_full(int rows, int cols, double value, bool requires_grad);
 Tensor* tensor_full_like(Tensor* t, double value, bool requires_grad);
+Tensor* tensor_mask(int rows, int cols, double prob, bool requires_grad);
 
 // Tensor Operations
 Tensor* tensor_add(Tensor* a, Tensor* b);
 void add_backward(Tensor* grad_out, Tensor* out);
+
+Tensor* tensor_sub(Tensor* a, Tensor* b);
 
 Tensor* tensor_multiply(Tensor* a, Tensor* b);
 void mul_backward(Tensor* grad_out, Tensor* out);
@@ -112,3 +115,23 @@ typedef struct {
 Linear* init_linear(int in_dim, int out_dim, bool has_bias);
 void free_linear(Linear* lin);
 Tensor* linear_forward(Linear* lin, Tensor* input);
+
+typedef struct {
+    int n_embed;
+    Tensor* gamma;
+    Tensor* beta;
+} LayerNorm;
+
+LayerNorm* init_layernorm(int n_embed);
+void free_layernorm(LayerNorm* ln);
+Tensor* layernorm_forward(LayerNorm* ln, Tensor* input);
+
+typedef struct {
+    double drop_prob;
+    bool train_mode;
+    Tensor* mask;
+} Dropout;
+
+Dropout* init_dropout(double drop_prob);
+void free_dropout(Dropout* dp);
+Tensor* dropout_forward(Dropout* dp, Tensor* input);

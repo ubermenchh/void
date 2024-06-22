@@ -206,6 +206,10 @@ Tensor* tensor_full(int rows, int cols, double value, bool requires_grad) {
 Tensor* tensor_full_like(Tensor* t, double value, bool requires_grad) {
     return init_tensor(MatrixFullLike(t->data, value), requires_grad);
 }
+    
+Tensor* tensor_mask(int rows, int cols, double prob, bool requires_grad) {
+    return init_tensor(MatrixMask(rows, cols, prob), requires_grad);
+}
 
 Tensor* tensor_add(Tensor* a, Tensor* b) {
     // out = a + b
@@ -239,6 +243,14 @@ void add_backward(Tensor* grad_output, Tensor* out) {
     }
     free_context(out->ctx);
     out->ctx = NULL;
+}
+
+Tensor* tensor_sub(Tensor* a, Tensor* b) {
+    Tensor* neg_b = tensor_negate(b);
+    Tensor* out = tensor_add(a, neg_b);
+
+    free_tensor(neg_b);
+    return out;
 }
 
 Tensor* tensor_multiply(Tensor* a, Tensor* b) {
