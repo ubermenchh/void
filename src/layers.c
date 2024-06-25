@@ -7,9 +7,9 @@ Linear* init_linear(int in_dim, int out_dim, bool has_bias) {
     lin->out_dim = out_dim;
     lin->has_bias = has_bias;
 
-    lin->weight = tensor_rand(in_dim, out_dim, true, 0); // (in_dim, out_dim)
+    lin->weight = tensor_randn(in_dim, out_dim, true, 0);
     if (has_bias) {
-        lin->bias = tensor_zeros(1, out_dim, true); // (1, out_dm)
+        lin->bias = tensor_zeros(1, out_dim, true);
     } else {
         lin->bias = NULL;
     }
@@ -24,7 +24,7 @@ void free_linear(Linear* lin) {
 }
 
 Tensor* linear_forward(Linear* lin, Tensor* input) {
-    // out = X@W + B
+    // out = X@W.T + B
     Tensor* out = tensor_matmul(input, lin->weight);
 
     if (lin->has_bias) {
@@ -91,4 +91,41 @@ Tensor* dropout_forward(Dropout* dp, Tensor* input) {
     Tensor* out = tensor_multiply(input, dp->mask);
 
     return out; 
+}
+
+Tensor* mse(Tensor* y_true, Tensor* y_pred) {
+    Tensor* diff = tensor_sub(y_true, y_pred);
+    Tensor* sqr = tensor_pow(diff, 2.0);
+    Tensor* out = tensor_mean(sqr, -1); // -1 for overall mean 
+    
+    if (out->requires_grad) {
+        out->ctx = init_context();
+        Tensor* saved_tensors[3] = {out, y_true, y_pred};
+        save_for_backward(out->ctx, saved_tensors, 1, NULL, 0);
+        out->grad_fn = mse_backward;
+    }
+
+    free_tensor(sqr);
+    free_tensor(diff);
+
+    return out;
+}
+
+void mse_backward(Tensor* grad_output, Tensor* out) {
+    Tensor* output = out->ctx->saved_tensors[0];
+    Tensor* y_true = out->ctx->saved_tensors[1];
+    Tensor* y_pred = out->ctx->saved_tensors[2];
+
+    if (output->requires_grad) {
+        Matrix* dmse = MatrixScalarMul(MatrixSub(y_true->data, y_pred->data), 2);
+        Matrix* grad_input = MatrixMultiply(dmse, grad_output->data);
+        
+        FreeMatrix(dmse);
+        tensor_backward(output, grad_input);
+        FreeMatrix(grad_input);
+    }
+    free_tensor(y_true);
+    free_tensor(y_pred);
+    free_context(out->ctx);
+    out->ctx = NULL;
 }

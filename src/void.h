@@ -25,6 +25,8 @@ void print_tensor(Tensor* t);
 void print_tensor_grad(Tensor* t);
 void tensor_backward(Tensor* t, Matrix* grad);
 void tensor_shape(Tensor* t);
+Context* init_context();
+void free_context(Context* ctx);
 
 // Tensor Initialization
 Tensor* tensor_rand(int rows, int cols, bool requires_grad, int seed);
@@ -110,6 +112,8 @@ typedef struct {
 
     Tensor* weight;
     Tensor* bias;
+
+    Tensor** parameters;
 } Linear;
 
 Linear* init_linear(int in_dim, int out_dim, bool has_bias);
@@ -135,3 +139,6 @@ typedef struct {
 Dropout* init_dropout(double drop_prob);
 void free_dropout(Dropout* dp);
 Tensor* dropout_forward(Dropout* dp, Tensor* input);
+
+Tensor* mse(Tensor* y_true, Tensor* y_pred);
+void mse_backward(Tensor* grad_output, Tensor* out);
