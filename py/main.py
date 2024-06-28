@@ -1,7 +1,6 @@
 from tensor import *
 from layers import *
 
-import numpy as np
 
 class SimpleNN(Module):
     def __init__(self, in_dim, hidden_dim, out_dim):
@@ -19,18 +18,33 @@ class SimpleNN(Module):
 if __name__=="__main__":
     x = Tensor.randn((10, 1), requires_grad=True)
     y = 3 * x + 2 + 0.1 * Tensor.randn((10, 1), requires_grad=True)
-    print(y)
-    epochs = 10 
-    model = SimpleNN(1, 10, 1)
-    criterion = MeanSquaredError()
-    optimizer = SGD(model.parameters(), lr=0.15)
 
+    data_x = Tensor([
+        [0, 0],
+        [0, 1],
+        [1, 0],
+        [1, 1]
+    ], requires_grad=True)
+    data_y = Tensor([
+        [1], 
+        [1], 
+        [1], 
+        [0]
+    ], requires_grad=True)
+    
+
+    epochs = 100 
+    model = SimpleNN(2, 10, 1)
+    criterion = MeanSquaredError()
+    optimizer = SGD(model.parameters(), lr=0.1)
+    
     for epoch in range(epochs):
         optimizer.zero_grad()
-        y_pred = model(x)
-        loss = criterion(y_pred, y)
+        y_pred = model(data_x)
+        loss = criterion(y_pred, data_y)
         loss.backward()
         optimizer.step()
 
         print(f"| Epoch: {epoch} | Loss: {loss.data} |")
+
     print(y_pred)

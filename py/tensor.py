@@ -5,34 +5,23 @@ def is_tensor(obj): return isinstance(obj, Tensor)
 def to_tensor(obj): return Tensor(obj) if not is_tensor(obj) else obj
 
 
-class Context:
-    def save_for_backward(self, *tensors):
-        self.saved_tensors = tensors 
-       
-    @property
-    def saved_tensors(self):
-        return self._saved_tensors
-    
-    @saved_tensors.setter
-    def saved_tensors(self, tensors):
-        self._saved_tensors = tensors
-
 class Function:
-    @staticmethod 
-    def forward(ctx, *args):
-        raise NotImplementedError("forward method not implemented")
-    
-    @staticmethod
-    def backward(ctx, *grad_output):
-        raise NotImplementedError("backward method not implemented")
+    def __init__(self, *tensors):
+        self.needs_input_grad = [t.requires_grad for t in tensors]
+        self.requires_grad = True if any(self.needs_input_grad) else False 
+        if self.requires_grad:
+            self.parents = tensors
+
+    def forward(self, *args, **kwargs): raise NotImplementedError("forward method not implemented")
+    def backward(self, *args, **kwargs): raise NotImplementedError("backward method not implemented")
 
     @classmethod 
-    def apply(cls, *args):
-        ctx = Context()
-        result = cls.forward(ctx, *args)
-        result.set_grad_fn(cls.backward)
-        result._ctx = ctx 
-        return result
+    def apply(fn, *x, **kwargs):
+        ctx = fn(x[0], *x)
+        ret = Tensor(ctx.forward(*[t.data for t in x], **kwargs), requires_grad=ctx.requires_grad)
+        if ctx.requires_grad:
+            ret._ctx = ctx 
+        return ret
 
 class Tensor:
     def __init__(self, data, requires_grad=False):
@@ -56,21 +45,37 @@ class Tensor:
     def zero_grad(self):
         self.grad = np.zeros_like(self.data)
 
-    def backward(self, grad=None):
-        if grad is None:
-            grad = np.ones_like(self.data)
-        if self.grad is None:
-            self.grad = grad 
-        else:
-            self.grad += grad 
-        if self._grad_fn:
-            grads = self._grad_fn(self._ctx, grad)
-            if not isinstance(grads, tuple):
-                grads = (grads,)
-            for t, g in zip(self._ctx.saved_tensors, grads):
-                if t.requires_grad:
-                    t.backward(g)
-    
+    ## for automatic differentiation
+    ## copied from Tinygrad by GeoHotz
+    def deepwalk(self):
+        def _deepwalk(node, visited, nodes):
+            visited.add(node)
+            if getattr(node, "_ctx", None):
+                for i in node._ctx.parents:
+                    if i not in visited: _deepwalk(i, visited, node)
+                nodes.append(node)
+            return nodes 
+        return _deepwalk(self, set(), [])
+
+    def backward(self):
+        assert self.shape == tuple(), \
+                f"backward can only be called on scalard tensors, but got of  shape {self.shape}"
+        self.grad = Tensor(1, requires_grad=False)
+
+        for t0 in reversed(self.deepwalk()):
+            assert (t0.grad is not None)
+            grads = t0._ctx.backward(t0.grad.data)
+            grads = [Tensor(g, requires_grad=False) if g is not None else None 
+                     for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
+            for t, g in zip(t0._ctx.parents, grads):
+                if g is not None and t.requires_grad:
+                    assert g.shape == t.shape, \
+                            f"grad shape must match tensor shape, {g.shape} != {t.shape}"
+                    t.grad = g if t.grad is None else (t.grad + g)
+            del t0._ctx 
+        return self
+    ##
+
     def repeat(self, *sizes):
         new_data = np.tile(self.data, sizes)
         return Tensor(new_data, requires_grad=self.requires_grad)
@@ -199,24 +204,12 @@ class Neg(Function):
         return -grad_output if a.requires_grad else None
 
 class Add(Function):
-    @staticmethod 
-    def forward(ctx, a, b):
-        ctx.save_for_backward(a, b)
-        result = Tensor(a.data + b.data, requires_grad=a.requires_grad or b.requires_grad)
-        return result 
+    def forward(self, a, b):
+        return a+b 
 
-    @staticmethod 
-    def backward(ctx, grad_output):
-        a, b = ctx.saved_tensors
-        grad_a = grad_output if a.requires_grad else None 
-        grad_b = grad_output if b.requires_grad else None 
-
-        if grad_a is not None and grad_a.shape != a.shape:
-            grad_a = grad_a.sum(axis=0, keepdims=True)
-        if grad_b is not None and grad_b.shape != b.shape:
-            grad_b = grad_b.sum(axis=0, keepdims=True)
-
-        return grad_a, grad_b
+    def backward(self, grad_output):
+        return grad_output if self.needs_input_grad[0] else None, \
+               grad_output if self.needs_input_grad[1] else None
 
 class Mul(Function):
     @staticmethod 
