@@ -28,11 +28,14 @@ class Module:
             if isinstance(param, Module):
                 param.eval()
 
+class Parameter(Tensor):
+    def __init__(self, tensor):
+        super().__init__(tensor, requires_grad=True)
 
 class Linear(Module):
     def __init__(self, in_dim, out_dim, bias=True):
         super().__init__()
-        self.w = Tensor.randn((out_dim, in_dim), requires_grad=True) / np.sqrt(in_dim)
+        self.w = Tensor.randn((out_dim, in_dim), requires_grad=True) / np.sqrt(in_dim + out_dim)
         self.b = Tensor.zeros((out_dim, 1), requires_grad=True) if bias else None
         self.bias = bias 
 
@@ -120,8 +123,5 @@ class SGD(Optim):
 
     def step(self):
         for param in self.params:
-            param.data -= self.lr * (param.grad + self.reg * param.data)
+            param.data -= self.lr * (param.grad.data + self.reg * param.data)
 
-    def zero_grad(self):
-        for param  in self.params:
-            param.zero_grad()

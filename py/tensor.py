@@ -6,24 +6,46 @@ def to_tensor(obj): return Tensor(obj) if not is_tensor(obj) else obj
 
 
 class Function:
-    def __init__(self, *tensors):
-        self.needs_input_grad = [t.requires_grad for t in tensors]
-        self.requires_grad = True if any(self.needs_input_grad) else False 
-        if self.requires_grad:
-            self.parents = tensors
+    __slots__ = (
+        "op",
+        "args",
+    )
 
-    def forward(self, *args, **kwargs): raise NotImplementedError("forward method not implemented")
-    def backward(self, *args, **kwargs): raise NotImplementedError("backward method not implemented")
+    def __init__(self, op, *args):
+        self.op: Function = op
+        self.args: list[Tensor] = args
 
-    @classmethod 
-    def apply(fn, *x, **kwargs):
-        ctx = fn(x[0], *x)
-        ret = Tensor(ctx.forward(*[t.data for t in x], **kwargs), requires_grad=ctx.requires_grad)
-        if ctx.requires_grad:
-            ret._ctx = ctx 
-        return ret
+    @classmethod
+    def apply(cls, *args):
+        ctx = Function(cls, *args)
+        result = cls.forward(*args)
+        if Function._is_part_of_graph(ctx):
+            result._ctx = ctx
+        return result
+
+    @staticmethod
+    def _is_part_of_graph(ctx):
+        if not Tensor._compute_grad:
+            return False
+
+        for node in ctx.args:
+            if isinstance(node, Tensor) and (
+                node.requires_grad or node._ctx is not None
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def forward(self, *args):
+        raise NotImplementedError
+
+    @staticmethod
+    def backward(self, *args):
+        raise NotImplementedError
 
 class Tensor:
+    _compute_grad = True
+
     def __init__(self, data, requires_grad=False):
         self.data = np.array(data, dtype=np.float32)
         self.requires_grad = requires_grad 
@@ -38,6 +60,8 @@ class Tensor:
 
     def __getitem__(self, idx): return Slice.apply(self, idx)
     def __setitem__(self, idx, value): self.data[idx] = value
+    def __hash__(self): return id(self)
+
 
     def set_grad_fn(self, grad_fn):
         self._grad_fn = grad_fn 
@@ -45,36 +69,60 @@ class Tensor:
     def zero_grad(self):
         self.grad = np.zeros_like(self.data)
 
-    ## for automatic differentiation
-    ## copied from Tinygrad by GeoHotz
-    def deepwalk(self):
-        def _deepwalk(node, visited, nodes):
-            visited.add(node)
-            if getattr(node, "_ctx", None):
-                for i in node._ctx.parents:
-                    if i not in visited: _deepwalk(i, visited, node)
-                nodes.append(node)
-            return nodes 
-        return _deepwalk(self, set(), [])
+    def _undo_broadcast(self, tensor, grad):
+        data = tensor.data
+        grad = grad.data
+
+        while len(data.shape) != len(grad.shape):
+            grad = grad.sum(axis=0, keepdims=(len(grad.shape) == 1))
+
+        for idx, (s1, s2) in enumerate(zip(data.shape, grad.shape)):
+            if s1 < s2:
+                grad = grad.sum(axis=idx, keepdims=True)
+
+        return Tensor(grad)
+
+    def numpy(self): return self.data.copy()
 
     def backward(self):
-        assert self.shape == tuple(), \
-                f"backward can only be called on scalard tensors, but got of  shape {self.shape}"
-        self.grad = Tensor(1, requires_grad=False)
+        if self._ctx is None:
+            return
 
-        for t0 in reversed(self.deepwalk()):
-            assert (t0.grad is not None)
-            grads = t0._ctx.backward(t0.grad.data)
-            grads = [Tensor(g, requires_grad=False) if g is not None else None 
-                     for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
-            for t, g in zip(t0._ctx.parents, grads):
-                if g is not None and t.requires_grad:
-                    assert g.shape == t.shape, \
-                            f"grad shape must match tensor shape, {g.shape} != {t.shape}"
-                    t.grad = g if t.grad is None else (t.grad + g)
-            del t0._ctx 
-        return self
-    ##
+        if self.grad is None:
+            if self.size != 1:
+                raise RuntimeError("Backward can not be called on non zero tensor")
+            self.grad = Tensor([1.0])
+
+        def topo_sort(node: Tensor, visited: set, sortlist: list) -> list:
+            if not isinstance(node, Tensor) or node in visited:
+                return sortlist
+            visited.add(node)
+            if node._ctx is None:
+                sortlist.append(node)
+                return sortlist
+            for child_node in node._ctx.args:
+                topo_sort(child_node, visited, sortlist)
+            sortlist.append(node)
+            return sortlist
+
+        node_list: list[Tensor] = reversed(topo_sort(self, set(), []))
+
+        for node in node_list:
+            if node._ctx is None:
+                continue
+            grads = node._ctx.op.backward(node._ctx, node.grad)
+            if len(node._ctx.args) == 1:
+                grads = [grads]
+
+            for tensor, grad in zip(node._ctx.args, grads):
+                if grad is None:
+                    continue
+                grad = self._undo_broadcast(tensor, grad)
+                if tensor.grad is None:
+                    tensor.grad = Tensor(np.zeros_like(tensor.data).astype(np.float32))
+                tensor.grad.data += grad.numpy()
+
+            node._ctx = None
 
     def repeat(self, *sizes):
         new_data = np.tile(self.data, sizes)
@@ -135,7 +183,7 @@ class Tensor:
 
     def __neg__(self):              return Neg.apply(self)
     def __add__(self, other):       return Add.apply(self, to_tensor(other))
-    def __sub__(self, other):       return self + -other 
+    def __sub__(self, other):       return Sub.apply(self, to_tensor(other))
     def __mul__(self, other):       return Mul.apply(self, to_tensor(other))
     def __truediv__(self, other):   return Div.apply(self, to_tensor(other))
     def __pow__(self, other):       return Pow.apply(self, to_tensor(other))
@@ -173,6 +221,8 @@ class Tensor:
     def shape(self): return self.data.shape
     @property 
     def dtype(self): return self.data.dtype
+    @property
+    def size(self): return self.data.size
 
     def transpose(self, axes=None): return Transpose.apply(self, axes)
     @property 
@@ -194,76 +244,78 @@ class Tensor:
 # Tensor Operations
 class Neg(Function):
     @staticmethod
-    def forward(ctx, a):
-        ctx.save_for_backward(a)
+    def forward(a):
         return Tensor(-a.data, requires_grad=a.requires_grad)
     
-    @staticmethod 
     def backward(ctx, grad_output):
-        a, = ctx.saved_tensors 
+        a = ctx.args
         return -grad_output if a.requires_grad else None
 
 class Add(Function):
-    def forward(self, a, b):
-        return a+b 
+    @staticmethod
+    def forward(a, b):
+        return Tensor(a.data + b.data, requires_grad=a.requires_grad or b.requires_grad)
 
-    def backward(self, grad_output):
-        return grad_output if self.needs_input_grad[0] else None, \
-               grad_output if self.needs_input_grad[1] else None
+    @staticmethod
+    def backward(ctx, grad):
+        a, b = ctx.args 
+        return grad if a.requires_grad else None, \
+               grad if b.requires_grad else None
+
+class Sub(Function):
+    @staticmethod
+    def forward(a, b):
+        return Tensor(a.data - b.data, requires_grad=a.requires_grad or b.requires_grad)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.args
+        return grad_output if a.requires_grad else None, \
+               -grad_output if b.requires_grad else None
 
 class Mul(Function):
-    @staticmethod 
-    def forward(ctx, a, b):
-        ctx.save_for_backward(a, b) 
-        result = Tensor(a.data * b.data, requires_grad=a.requires_grad or b.requires_grad)
-        return result 
+    @staticmethod
+    def forward(a, b):
+        return Tensor(a.data * b.data, requires_grad=a.requires_grad or b.requires_grad)
 
-    @staticmethod 
+    @staticmethod
     def backward(ctx, grad_output):
-        a, b = ctx.saved_tensors 
-        grad_a = grad_output * b.data if a.requires_grad else None 
-        grad_b = grad_output * a.data if b.requires_grad else None 
+        a, b = ctx.args
+        grad_a = grad_output * b if a.requires_grad else None 
+        grad_b = grad_output * a if b.requires_grad else None 
         return grad_a, grad_b
 
 class Div(Function):
-    @staticmethod 
-    def forward(ctx, a, b):
-        ctx.save_for_backward(a, b) 
-        result = Tensor(a.data / b.data, requires_grad=a.requires_grad or b.requires_grad)
-        return result 
+    @staticmethod
+    def forward(a, b):
+        return Tensor(a.data / b.data, requires_grad=a.requires_grad or b.requires_grad)
 
-    @staticmethod 
+    @staticmethod
     def backward(ctx, grad_output):
-        a, b = ctx.saved_tensors 
-        grad_a = grad_output / b.data if a.requires_grad else None 
-        grad_b = -grad_output * a.data / (b.data**2) if b.requires_grad else None 
+        a, b = ctx.args
+        grad_a = grad_output / b if a.requires_grad else None 
+        grad_b = -grad_output * a / (b**2) if b.requires_grad else None 
         return grad_a, grad_b
 
 class Sum(Function):
     @staticmethod 
-    def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a)
-        _data = a.data.sum(axis=dim, keepdims=keepdim)
-        return Tensor(_data, requires_grad=a.requires_grad)
+    def forward(x, dim, keepdim):
+        return Tensor(x.data.sum(axis=dim, keepdims=keepdim))
 
     @staticmethod 
-    def backward(ctx, grad_output):
-        a, = ctx.saved_tensors
-        if a.requires_grad:
-            grad_a = np.ones_like(a.data) * grad_output
-            return grad_a 
-        return None
+    def backward(ctx, grad):
+        x, _, _ = ctx.args
+        return Tensor(np.broadcast_to(grad.data, x.shape)), None
 
 class Max(Function):
     @staticmethod 
-    def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a, dim, keepdim)
+    def forward(a, dim, keepdim):
         _data = a.data.max(axis=dim, keepdims=keepdim)
         return Tensor(_data, requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, dim, keepdim = ctx.saved_tensors
+        a, dim, keepdim = ctx.args
         if not a.requires_grad:
             return None 
         
@@ -278,14 +330,13 @@ class Max(Function):
 
 class Min(Function):
     @staticmethod 
-    def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a, dim, keepdim)
+    def forward(a, dim, keepdim):
         _data = a.data.min(axis=dim, keepdims=keepdim)
         return Tensor(_data, requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, dim, keepdim = ctx.saved_tensors
+        a, dim, keepdim = ctx.args
         if not a.requires_grad:
             return None 
         
@@ -300,13 +351,12 @@ class Min(Function):
 
 class Pow(Function):
     @staticmethod
-    def forward(ctx, a, b):
-        ctx.save_for_backward(a, b)
+    def forward(a, b):
         return Tensor(a.data**b.data, requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, b = ctx.saved_tensors
+        a, b = ctx.args
         if a.requires_grad:
             grad_a = b.data * (a.data ** (b.data - 1)) * grad_output
             return grad_a 
@@ -314,13 +364,12 @@ class Pow(Function):
 
 class Log(Function):
     @staticmethod
-    def forward(ctx, a):
-        ctx.save_for_backward(a)
+    def forward(a):
         return Tensor(np.log(a.data), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, = ctx.saved_tensors
+        a = ctx.args
         if a.requires_grad:
             grad_a = (1. / a.data) * grad_output
             return grad_a 
@@ -328,13 +377,12 @@ class Log(Function):
 
 class Sqrt(Function):
     @staticmethod
-    def forward(ctx, a):
-        ctx.save_for_backward(a)
+    def forward(a):
         return Tensor(np.sqrt(a.data), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, = ctx.saved_tensors
+        a = ctx.args
         if a.requires_grad:
             grad_a = (1. / 2 * a.data) * grad_output
             return grad_a 
@@ -342,13 +390,12 @@ class Sqrt(Function):
 
 class Sin(Function):
     @staticmethod
-    def forward(ctx, a):
-        ctx.save_for_backward(a)
+    def forward(a):
         return Tensor(np.sin(a.data), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, = ctx.saved_tensors
+        a = ctx.args
         if a.requires_grad:
             grad_a = np.cos(a.data) * grad_output
             return grad_a 
@@ -356,13 +403,12 @@ class Sin(Function):
 
 class Cos(Function):
     @staticmethod
-    def forward(ctx, a):
-        ctx.save_for_backward(a)
+    def forward(a):
         return Tensor(np.cos(a.data), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, = ctx.saved_tensors
+        a = ctx.args
         if a.requires_grad:
             grad_a = -np.sin(a.data) * grad_output
             return grad_a 
@@ -370,13 +416,12 @@ class Cos(Function):
 
 class Exp(Function):
     @staticmethod
-    def forward(ctx, a):
-        ctx.save_for_backward(a)
+    def forward(a):
         return Tensor(np.exp(a.data), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, = ctx.saved_tensors
+        a = ctx.args
         if a.requires_grad:
             grad_a = np.exp(a.data) * grad_output
             return grad_a 
@@ -384,13 +429,12 @@ class Exp(Function):
 
 class Mean(Function): 
     @staticmethod 
-    def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a, dim, keepdim)
+    def forward(a, dim, keepdim):
         return Tensor(a.data.mean(axis=dim, keepdims=keepdim), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, dim, keepdim = ctx.saved_tensors  
+        a, dim, keepdim = ctx.args  
 
         if a.requires_grad:
             if dim is None:
@@ -405,13 +449,12 @@ class Mean(Function):
 
 class Var(Function):
     @staticmethod 
-    def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a, dim, keepdim)
+    def forward(a, dim, keepdim):
         return Tensor(a.data.var(axis=dim, keepdims=keepdim), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, dim, _ = ctx.saved_tensors 
+        a, dim, _ = ctx.args 
 
         if a.requires_grad:
             grad_a = np.ones_like(a.data) * grad_output 
@@ -421,13 +464,12 @@ class Var(Function):
 
 class Relu(Function):
     @staticmethod 
-    def forward(ctx, a):
-        ctx.save_for_backward(a)
+    def forward(a):
         return Tensor(np.maximum(a.data, 0), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, = ctx.saved_tensors 
+        a, = ctx.args
         if a.requires_grad:
             grad_a = (a.data > 0) * grad_output 
             return grad_a 
@@ -435,26 +477,24 @@ class Relu(Function):
 
 class Matmul(Function):
     @staticmethod 
-    def forward(ctx, a, b):
-        ctx.save_for_backward(a, b)
+    def forward(a, b):
         return Tensor(np.matmul(a.data, b.data), requires_grad=a.requires_grad or b.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, b = ctx.saved_tensors
+        a, b = ctx.args
         grad_a = grad_output @ b.data.T if a.requires_grad else None 
         grad_b = a.data.T @ grad_output if b.requires_grad else None 
         return grad_a, grad_b
 
 class Transpose(Function):
     @staticmethod 
-    def forward(ctx, a, *axes):
-        ctx.save_for_backward(a, axes)
+    def forward(a, *axes):
         return Tensor(np.transpose(a.data, *axes), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, axes = ctx.saved_tensors 
+        a, axes = ctx.args
         if a.requires_grad:
             grad_a = np.transpose(grad_output, *axes)
             return grad_a 
@@ -462,13 +502,12 @@ class Transpose(Function):
 
 class Slice(Function):
     @staticmethod 
-    def forward(ctx, a, idx):
-        ctx.save_for_backward(a, idx)
+    def forward(a, idx):
         return Tensor(a.data[idx], requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, idx = ctx.saved_tensors 
+        a, idx = ctx.args
         if a.requires_grad:
             grad_a = np.zeros_like(a.data)
             grad_a[idx] = grad_output 
@@ -477,13 +516,12 @@ class Slice(Function):
 
 class Reshape(Function):
     @staticmethod
-    def forward(ctx, a, *shape):
-        ctx.save_for_backward(a, shape)
+    def forward(a, *shape):
         return Tensor(a.data.reshape(shape), requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, shape = ctx.saved_tensors 
+        a, shape = ctx.args
         if a.requires_grad:
             grad_a = grad_output.reshape(shape)
             return grad_a 
@@ -491,15 +529,14 @@ class Reshape(Function):
 
 class Concat(Function):
     @staticmethod 
-    def forward(ctx, tensors, dim=0):
-        ctx.save_for_backward(tensors, dim)
+    def forward(tensors, dim=0):
         new_data = np.concatenate([t.data for t in tensors], axis=dim)
         requires_grad = any(t.requires_grad for t in tensors)
         return Tensor(new_data, requires_grad=requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        tensors, dim = ctx.saved_tensors
+        tensors, dim = ctx.args 
         grad_tensors = []
         start = 0
         for tensor in tensors:
@@ -516,15 +553,14 @@ class Concat(Function):
 
 class Stack(Function):
     @staticmethod
-    def forward(ctx, tensors, dim=0):
-        ctx.save_for_backward(tensors, dim)
+    def forward(tensors, dim=0):
         new_data = np.stack([t.data for t in tensors], axis=dim)
         requires_grad = any(t.requires_grad for t in tensors)
         return Tensor(new_data, requires_grad=requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        tensors, dim = ctx.saved_tensors 
+        tensors, dim = ctx.args 
         grad_tensors = []
         for i, t in enumerate(tensors):
             if t.requires_grad:
@@ -536,14 +572,13 @@ class Stack(Function):
 
 class MaskedFill(Function):
     @staticmethod 
-    def forward(ctx, a, condition, value):
-        ctx.save_for_backward(a, condition, value)
+    def forward(a, condition, value):
         data = np.where(condition, a.data, value)
         return Tensor(data, requires_grad=a.requires_grad)
 
     @staticmethod 
     def backward(ctx, grad_output):
-        a, condition, _ = ctx.saved_tensors 
+        a, condition, _ = ctx.args
         if a.requires_grad:
             grad_a = np.where(condition, grad_output, 0)
             return grad_a 
