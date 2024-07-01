@@ -1,6 +1,34 @@
 from tensor import *
 from layers import *
 
+if __name__=="__main__":
+    x = Tensor([
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9]
+    ], requires_grad=True)
+    y = Tensor([
+        [1, 1, 1],
+        [1, 1, 1],
+        [1, 1, 1]
+    ], requires_grad=True)
+    z = x * y + (x / y)
+    a = z.sum()
+    
+    a.backward()
+
+    print(x)
+    print(y)
+    print(z)
+    print(a)
+    
+    print(a.grad)
+    print(z.grad)
+    print(y.grad)
+    print(x.grad)
+"""
+
+
 class SimpleNN(Module):
     def __init__(self, in_dim, hidden_dim, out_dim):
         super().__init__()
@@ -30,7 +58,6 @@ if __name__=="__main__":
         [1], 
         [0]
     ], requires_grad=True)
-    
 
     epochs = 100 
     model = SimpleNN(2, 10, 1)
@@ -47,3 +74,4 @@ if __name__=="__main__":
         print(f"| Epoch: {epoch} | Loss: {loss.data} |")
 
     print(y_pred)
+"""
