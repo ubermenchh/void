@@ -42,7 +42,7 @@ class Linear(Module):
     def forward(self, x):
         out = x @ self.w.T
         if self.bias:
-            out += self.b.T.repeat(x.shape[0], 1) 
+            out += self.b.T
         return out
 
 class ReLU(Module):

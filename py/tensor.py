@@ -1,4 +1,5 @@
 import numpy as np
+import math
 
 # Helper Functions
 def is_tensor(obj): return isinstance(obj, Tensor)
@@ -34,33 +35,30 @@ class Tensor:
     def numpy(self): return self.data.copy()
 
     def backward(self):
+        if self._ctx is None: return
         if self.size != 1:
-            raise ValueError(
-                    f"backward can only be called for scalar tensors, but got of shape {self.shape}")
-        
-        if self.grad is None:
-            self.grad = Tensor.ones_like(self)
+            raise ValueError(f"backward can only be called for scalar tensors, but got of shape {self.shape}")
+        if self.grad is None: self.grad = Tensor(1.0)
 
         def build_topo(tensor, visited, nodes):
             if tensor not in visited:
                 visited.add(tensor)
                 if tensor._ctx:
                     for parent in tensor._ctx.saved_tensors:
-                        build_topo(parent, visited, nodes)
+                        if parent not in visited: build_topo(parent, visited, nodes)
                 nodes.append(tensor)
             return nodes
-            
-        for tensor in reversed(build_topo(self, set(), [])):
+        
+        nodes = build_topo(self, set(), [])
+
+        for tensor in reversed(nodes):
             if tensor._ctx:
                 grads = tensor._ctx.backward(tensor._ctx, tensor.grad)
                 for parent, grad in zip(tensor._ctx.saved_tensors, grads):
-                    if parent.requires_grad:
-                        if parent.grad is None:
-                            parent.grad = grad
-                        else:
-                            parent.grad += grad
-        
-
+                    if grad is not None and parent.requires_grad:
+                        assert grad.shape == parent.shape, f"grad shape must match tensor shape, {grad.shape} != {parent.shape}"
+                        parent.grad = grad if parent.grad is None else (parent.grad + grad)
+        return self
 
     def repeat(self, *sizes):
         new_data = np.tile(self.data, sizes)
@@ -118,6 +116,13 @@ class Tensor:
     def mean(self, dim=None, keepdim=False): return Mean.apply(self, dim, keepdim)
     def var(self, dim=None, keepdim=False): return Var.apply(self, dim, keepdim)
     def std(self, dim=None, keepdim=False): return self.var(dim, keepdim).sqrt()
+    
+    def add(self, other):           return Add.apply(self, to_tensor(other))
+    def sub(self, other):           return Sub.apply(self, to_tensor(other))
+    def multiply(self, other):      return Mul.apply(self, to_tensor(other))
+    def divide(self, other):        return Div.apply(self, to_tensor(other))
+    def pow(self, other):           return Pow.apply(self, to_tensor(other))
+    def matmul(self, other):        return Matmul.apply(self, to_tensor(other))
 
     def __neg__(self):              return Neg.apply(self)
     def __add__(self, other):       return Add.apply(self, to_tensor(other))
@@ -128,14 +133,14 @@ class Tensor:
     def __matmul__(self, other):    return Matmul.apply(self, to_tensor(other))
 
     def __radd__(self, other):      return Add.apply(to_tensor(other), self)
-    def __rsub__(self, other):      return other + -self
+    def __rsub__(self, other):      return Sub.apply(to_tensor(other), self)
     def __rmul__(self, other):      return Mul.apply(to_tensor(other), self)
     def __rtruediv__(self, other):  return Div.apply(to_tensor(other), self)
     def __rpow__(self, other):      return Pow.apply(to_tensor(other), self)
     def __rmatmul__(self, other):   return Matmul(to_tensor(other), self)
 
     def __iadd__(self, other):      return Add.apply(self, to_tensor(other))
-    def __isub__(self, other):      return self + -other
+    def __isub__(self, other):      return Sub.apply(self, to_tensor(other))
     def __imul__(self, other):      return Mul.apply(self, to_tensor(other))
     def __itruediv__(self, other):  return Div.apply(self, to_tensor(other))
 
@@ -177,7 +182,8 @@ class Tensor:
         return Stack.apply([self] + others, dim)
     def masked_fill(self, condition, value):
         return MaskedFill.apply(self, condition, value)
-
+    def repeat(self, shape):
+        return Tensor.ones(shape) * self
 
 # Tensor Operations
 class Function:
@@ -204,7 +210,7 @@ class Function:
 class Neg(Function):
     @staticmethod
     def forward(ctx, a):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         return Tensor(-a.data, requires_grad=a.requires_grad)
     
     @staticmethod
@@ -267,12 +273,13 @@ class Sum(Function):
     @staticmethod
     def backward(ctx, grad):
         x, = ctx.saved_tensors
-        return np.broadcast_to(grad.data, x.shape), None
+        out = np.broadcast_to(grad.data, x.shape)
+        return out, None
 
 class Max(Function):
     @staticmethod
     def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         ctx.dim, ctx.keepdim = dim, keepdim
         _data = a.data.max(axis=dim, keepdims=keepdim)
         return Tensor(_data, requires_grad=a.requires_grad)
@@ -291,12 +298,12 @@ class Max(Function):
         grad_a = mask * grad.data
         if not keepdim and dim is not None:
             grad_a = np.sum(grad_a, axis=dim, keepdims=keepdim)
-        return Tensor(grad_a)
+        return grad_a, None
 
 class Min(Function):
     @staticmethod
     def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         ctx.dim, ctx.keepdim = dim, keepdim
         _data = a.data.min(axis=dim, keepdims=keepdim)
         return Tensor(_data, requires_grad=a.requires_grad)
@@ -315,7 +322,7 @@ class Min(Function):
         grad_a = mask * grad_output
         if not keepdim and dim is not None:
             grad_a = np.sum(grad_a, axis=dim, keepdims=keepdim)
-        return grad_a
+        return grad_a, None
 
 class Pow(Function):
     @staticmethod
@@ -328,13 +335,13 @@ class Pow(Function):
         a, b = ctx.saved_tensors
         if a.requires_grad:
             grad_a = b.data * (a.data ** (b.data - 1)) * grad.data
-            return Tensor(grad_a)
-        return None
+            return grad_a, None
+        return None, None
 
 class Log(Function):
     @staticmethod
     def forward(ctx, a):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         return Tensor(np.log(a.data), requires_grad=a.requires_grad)
     
     @staticmethod
@@ -342,13 +349,13 @@ class Log(Function):
         a, = ctx.saved_tensors
         if a.requires_grad:
             grad_a = (1. / a.data) * grad.data
-            return Tensor(grad_a) 
-        return None
+            return grad_a, None
+        return None, None
 
 class Sqrt(Function):
     @staticmethod
     def forward(ctx, a):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         return Tensor(np.sqrt(a.data), requires_grad=a.requires_grad)
 
     @staticmethod
@@ -356,13 +363,13 @@ class Sqrt(Function):
         a, = ctx.saved_tensors
         if a.requires_grad:
             grad_a = (1. / 2 * a.data) * grad.data
-            return Tensor(grad_a) 
-        return None
+            return grad_a, None 
+        return None, None
 
 class Sin(Function):
     @staticmethod
     def forward(ctx, a):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         return Tensor(np.sin(a.data), requires_grad=a.requires_grad)
 
     @staticmethod
@@ -370,13 +377,13 @@ class Sin(Function):
         a, = ctx.saved_tensors
         if a.requires_grad:
             grad_a = np.cos(a.data) * grad.data
-            return Tensor(grad_a)
-        return None
+            return grad_a, None
+        return None, None
 
 class Cos(Function):
     @staticmethod
     def forward(ctx, a):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         return Tensor(np.cos(a.data), requires_grad=a.requires_grad)
 
     @staticmethod
@@ -384,13 +391,13 @@ class Cos(Function):
         a, = ctx.saved_tensors
         if a.requires_grad:
             grad_a = -np.sin(a.data) * grad.data
-            return Tensor(grad_a)
-        return None
+            return grad_a, None
+        return None, None
 
 class Exp(Function):
     @staticmethod
     def forward(ctx, a):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         return Tensor(np.exp(a.data), requires_grad=a.requires_grad)
 
     @staticmethod
@@ -398,13 +405,13 @@ class Exp(Function):
         a, = ctx.saved_tensors
         if a.requires_grad:
             grad_a = np.exp(a.data) * grad.data
-            return Tensor(grad_a) 
-        return None
+            return grad_a, None 
+        return None, None
 
 class Mean(Function):
     @staticmethod
     def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         ctx.dim, ctx.keepdim = dim, keepdim
         return Tensor(a.data.mean(axis=dim, keepdims=keepdim), requires_grad=a.requires_grad)
 
@@ -412,7 +419,7 @@ class Mean(Function):
     def backward(ctx, grad):
         a, = ctx.saved_tensors
         dim, keepdim = ctx.dim, ctx.keepdim
-
+        
         if a.requires_grad:
             if dim is None:
                 n = np.prod(a.data.shape)
@@ -421,13 +428,13 @@ class Mean(Function):
             grad_a = np.ones_like(a.data) * grad.data / n 
             if not keepdim and dim is not None:
                 grad_a = np.expand_dims(grad_a, axis=dim)
-            return Tensor(grad_a)
-        return None
+            return grad_a, None
+        return None, None
 
 class Var(Function):
     @staticmethod
     def forward(ctx, a, dim, keepdim):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         ctx.dim, ctx.keepdim = dim, keepdim
         return Tensor(a.data.var(axis=dim, keepdims=keepdim), requires_grad=a.requires_grad)
 
@@ -439,13 +446,13 @@ class Var(Function):
         if a.requires_grad:
             grad_a = np.ones_like(a.data) * grad.data 
             grad_a = grad_a * 2 * (a.data - a.data.mean(axis=dim, keepdims=True)) / np.prod(np.array(a.shape)[dim])
-            return Tensor(grad_a) 
-        return None
+            return grad_a, None 
+        return None, None
 
 class Relu(Function):
     @staticmethod
     def forward(ctx, a):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         return Tensor(np.maximum(a.data, 0), requires_grad=a.requires_grad)
 
     @staticmethod
@@ -453,26 +460,27 @@ class Relu(Function):
         a, = ctx.saved_tensors
         if a.requires_grad:
             grad_a = (a.data > 0) * grad.data 
-            return Tensor(grad_a) 
-        return None
+            return grad_a, None 
+        return None, None
 
 class Matmul(Function):
     @staticmethod
     def forward(ctx, a, b):
         ctx.save_for_backward(a, b)
-        return Tensor(np.matmul(a.data, b.data), requires_grad=a.requires_grad or b.requires_grad)
+        return Tensor(a.data @ b.data, requires_grad=a.requires_grad or b.requires_grad)
 
     @staticmethod
     def backward(ctx, grad):
         a, b = ctx.saved_tensors
-        grad_a = grad.data @ b.data.T if a.requires_grad else None 
-        grad_b = a.data.T @ grad.data if b.requires_grad else None 
-        return Tensor(grad_a), Tensor(grad_b)
+        grad_a = grad @ b.data.T
+        grad_b = a.data.T @ grad
+
+        return grad_a, grad_b
 
 class Transpose(Function):
     @staticmethod
     def forward(ctx, a, *axes):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         ctx.axes = axes
         return Tensor(np.transpose(a.data, *axes), requires_grad=a.requires_grad)
 
@@ -480,15 +488,13 @@ class Transpose(Function):
     def backward(ctx, grad):
         a, = ctx.saved_tensors
         axes = ctx.axes
-        if a.requires_grad:
-            grad_a = np.transpose(grad.data, *axes)
-            return Tensor(grad_a) 
-        return None
+        grad_a = np.transpose(grad, *axes)
+        return grad_a, None 
 
 class Slice(Function):
     @staticmethod
     def forward(ctx, a, idx):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         ctx.idx = idx
         return Tensor(a.data[idx], requires_grad=a.requires_grad)
     
@@ -499,13 +505,13 @@ class Slice(Function):
         if a.requires_grad:
             grad_a = np.zeros_like(a.data)
             grad_a[idx] = grad.data 
-            return Tensor(grad_a) 
-        return None
+            return grad_a, None 
+        return None, None
 
 class Reshape(Function):
     @staticmethod
     def forward(ctx, a, *shape):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         ctx.shape = shape
         return Tensor(a.data.reshape(shape), requires_grad=a.requires_grad)
 
@@ -515,8 +521,8 @@ class Reshape(Function):
         shape = ctx.shape
         if a.requires_grad:
             grad_a = grad.data.reshape(shape)
-            return Tensor(grad_a)
-        return None
+            return grad_a, None
+        return None, None
 
 class Concat(Function):
     @staticmethod
@@ -533,7 +539,7 @@ class Concat(Function):
         dim = ctx.dim
         grad_data = grad.data
         grads = np.split(grad_data, [t.shape[dim] for t in tensors[:-1]], axis=dim)
-        return [Tensor(g) for g in grads], None
+        return [grads], None
 
 class Stack(Function):
     @staticmethod
@@ -550,12 +556,12 @@ class Stack(Function):
         dim = ctx.dim
         grad_data = grad.data
         grads = np.split(grad_data, grad_data.shape[dim], axis=dim)
-        return tuple([*[Tensor(g) for g in grads], None])
+        return tuple([*[grads], None])
 
 class MaskedFill(Function):
     @staticmethod
     def forward(ctx, a, condition, value):
-        ctx.save_for_backward(a,)
+        ctx.save_for_backward(a)
         ctx.condition, ctx.value = condition, value
         data = np.where(condition, a.data, value)
         return Tensor(data, requires_grad=a.requires_grad)
@@ -566,5 +572,5 @@ class MaskedFill(Function):
         condition, value = ctx.condition, ctx.value
         if a.requires_grad:
             grad_a = np.where(condition, grad.data, 0)
-            return Tensor(grad_a) 
-        return None
+            return grad_a, None 
+        return None, None

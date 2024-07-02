@@ -1,6 +1,6 @@
 from tensor import *
 from layers import *
-
+"""
 if __name__=="__main__":
     x = Tensor([
         [1, 2, 3],
@@ -8,24 +8,20 @@ if __name__=="__main__":
         [7, 8, 9]
     ], requires_grad=True)
     y = Tensor([
-        [1, 1, 1],
-        [1, 1, 1],
-        [1, 1, 1]
+        [3, 4, 5],
+        [1, 2, 3],
+        [1, 2, 3]
     ], requires_grad=True)
-    z = x * y + (x / y)
-    a = z.sum()
-    
-    a.backward()
 
-    print(x)
-    print(y)
+    z = x @ y.T 
+    a = z.var()
+    
     print(z)
     print(a)
-    
-    print(a.grad)
-    print(z.grad)
-    print(y.grad)
+    a.backward()
     print(x.grad)
+    print(y.grad)
+
 """
 
 
@@ -64,7 +60,7 @@ if __name__=="__main__":
     criterion = MeanSquaredError()
     optimizer = SGD(model.parameters(), lr=0.1)
     
-    for epoch in range(epochs):
+    for epoch in range(1):
         optimizer.zero_grad()
         y_pred = model(data_x)
         loss = criterion(y_pred, data_y)
@@ -74,4 +70,3 @@ if __name__=="__main__":
         print(f"| Epoch: {epoch} | Loss: {loss.data} |")
 
     print(y_pred)
-"""
