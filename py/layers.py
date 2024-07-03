@@ -42,7 +42,7 @@ class Linear(Module):
     def forward(self, x):
         out = x @ self.w.T
         if self.bias:
-            out += self.b.T
+            out += self.b.data.reshape(1, -1)
         return out
 
 class ReLU(Module):
@@ -105,7 +105,8 @@ class MeanSquaredError(Module):
 
     def forward(self, y_pred, y_true):
         out = (y_pred - y_true)**2 
-        return out.mean()
+        out = out.mean()
+        return out
 
 class Optim:
     def __init__(self): pass 

@@ -1,26 +1,33 @@
 from tensor import *
 from layers import *
+
 """
 if __name__=="__main__":
-    x = Tensor([
+    a = Tensor([
         [1, 2, 3],
         [4, 5, 6],
         [7, 8, 9]
     ], requires_grad=True)
-    y = Tensor([
+    b = Tensor([
         [3, 4, 5],
         [1, 2, 3],
         [1, 2, 3]
     ], requires_grad=True)
+    x = Tensor.randn((10, 1), requires_grad=True)
+    y = Tensor.randn((10, 1), requires_grad=True)
 
-    z = x @ y.T 
-    a = z.var()
-    
-    print(z)
-    print(a)
-    a.backward()
-    print(x.grad)
-    print(y.grad)
+    lin1 = Linear(1, 10)
+    act = ReLU()
+    lin2 = Linear(10, 1)
+    loss_fn = MeanSquaredError()
+
+    out = lin1(x)
+    out = act(out)
+    out = lin2(out)
+    loss = loss_fn(out, y)
+
+    loss.backward()
+    print(loss)
 
 """
 
@@ -49,7 +56,7 @@ if __name__=="__main__":
         [1, 1]
     ], requires_grad=True)
     data_y = Tensor([
-        [1], 
+        [0], 
         [1], 
         [1], 
         [0]
@@ -60,13 +67,14 @@ if __name__=="__main__":
     criterion = MeanSquaredError()
     optimizer = SGD(model.parameters(), lr=0.1)
     
-    for epoch in range(1):
+    for epoch in range(epochs):
         optimizer.zero_grad()
         y_pred = model(data_x)
         loss = criterion(y_pred, data_y)
         loss.backward()
         optimizer.step()
 
-        print(f"| Epoch: {epoch} | Loss: {loss.data} |")
+        print(f"| Epoch: {epoch} | Loss: {loss.data:.4f} |")
 
     print(y_pred)
+

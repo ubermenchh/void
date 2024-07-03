@@ -14,7 +14,6 @@ class Tensor:
         self.requires_grad = requires_grad 
         
         self.grad = None 
-        self._grad_fn = None 
         self._ctx = None
 
     def __repr__(self):
@@ -24,10 +23,6 @@ class Tensor:
     def __getitem__(self, idx): return Slice.apply(self, idx)
     def __setitem__(self, idx, value): self.data[idx] = value
     def __hash__(self): return id(self)
-
-
-    def set_grad_fn(self, grad_fn):
-        self._grad_fn = grad_fn 
     
     def zero_grad(self):
         self.grad = np.zeros_like(self.data)
@@ -110,12 +105,12 @@ class Tensor:
     def tril(self, diag=0, **kwargs): return Tensor(np.tril(self.data, k=diag, **kwargs), requires_grad=self.requires_grad)
 
 
-    def sum(self, dim=None, keepdim=False): return Sum.apply(self, dim, keepdim)
-    def max(self, dim=None, keepdim=False): return Max.apply(self, dim, keepdim)
-    def min(self, dim=None, keepdim=False): return Min.apply(self, dim, keepdim)
+    def sum(self, dim=None, keepdim=False):  return Sum.apply(self, dim, keepdim)
+    def max(self, dim=None, keepdim=False):  return Max.apply(self, dim, keepdim)
+    def min(self, dim=None, keepdim=False):  return Min.apply(self, dim, keepdim)
     def mean(self, dim=None, keepdim=False): return Mean.apply(self, dim, keepdim)
-    def var(self, dim=None, keepdim=False): return Var.apply(self, dim, keepdim)
-    def std(self, dim=None, keepdim=False): return self.var(dim, keepdim).sqrt()
+    def var(self, dim=None, keepdim=False):  return Var.apply(self, dim, keepdim)
+    def std(self, dim=None, keepdim=False):  return self.var(dim, keepdim).sqrt()
     
     def add(self, other):           return Add.apply(self, to_tensor(other))
     def sub(self, other):           return Sub.apply(self, to_tensor(other))
@@ -215,7 +210,7 @@ class Neg(Function):
     
     @staticmethod
     def backward(ctx, grad):
-        return -grad
+        return -grad, None
 
 class Add(Function):
     @staticmethod
@@ -289,7 +284,7 @@ class Max(Function):
         a, = ctx.saved_tensors
         dim, keepdim = ctx.dim, ctx.keepdim
         if not a.requires_grad:
-            return None 
+            return None, None 
         
         mask = (a.data == np.max(a.data, axis=dim, keepdims=keepdim))
         if not keepdim and dim is not None:
@@ -313,7 +308,7 @@ class Min(Function):
         a, = ctx.saved_tensors
         dim, keepdim = ctx.dim, ctx.keepdim
         if not a.requires_grad:
-            return None 
+            return None, None
         
         mask = (a.data == np.min(a.data, axis=dim, keepdims=keepdim))
         if not keepdim and dim is not None:
@@ -412,24 +407,24 @@ class Mean(Function):
     @staticmethod
     def forward(ctx, a, dim, keepdim):
         ctx.save_for_backward(a)
-        ctx.dim, ctx.keepdim = dim, keepdim
+        ctx.input_shape = a.data.shape
+
+        if dim is None:
+            ctx.num_el = a.data.size 
+        elif isinstance(dim, int):
+            ctx.num_el = a.data.shape[dim]
+        else:
+            ctx.num_el = np.prod([a.data.shape[d] for d in dim])
+
         return Tensor(a.data.mean(axis=dim, keepdims=keepdim), requires_grad=a.requires_grad)
 
     @staticmethod
     def backward(ctx, grad):
         a, = ctx.saved_tensors
-        dim, keepdim = ctx.dim, ctx.keepdim
+        num_el, input_shape = ctx.num_el, ctx.input_shape
         
-        if a.requires_grad:
-            if dim is None:
-                n = np.prod(a.data.shape)
-            else:
-                n = a.data.shape[dim]
-            grad_a = np.ones_like(a.data) * grad.data / n 
-            if not keepdim and dim is not None:
-                grad_a = np.expand_dims(grad_a, axis=dim)
-            return grad_a, None
-        return None, None
+        grad_input = np.broadcast_to(grad.data / num_el, input_shape)
+        return grad_input, None
 
 class Var(Function):
     @staticmethod
@@ -459,7 +454,7 @@ class Relu(Function):
     def backward(ctx, grad):
         a, = ctx.saved_tensors
         if a.requires_grad:
-            grad_a = (a.data > 0) * grad.data 
+            grad_a = np.where(a.data > 0, 1, 0) * grad
             return grad_a, None 
         return None, None
 
