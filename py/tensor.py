@@ -21,6 +21,7 @@ class Tensor:
 
     def __getitem__(self, idx): return Slice.apply(self, idx)
     def __setitem__(self, idx, value): self.data[idx] = value
+    def __len__(self): return len(self.data) if self.ndim != 0 else 1
     def __hash__(self): return id(self)
     
     def zero_grad(self):
@@ -60,15 +61,19 @@ class Tensor:
 
     @staticmethod 
     def randn(shape, requires_grad=False, **kwargs):
+        assert type(shape) == tuple
         return Tensor(np.random.randn(*shape, **kwargs), requires_grad=requires_grad)
     @staticmethod 
     def rand(shape, requires_grad=False, **kwargs):
+        assert type(shape) == tuple
         return Tensor(np.random.rand(*shape, **kwargs), requires_grad=requires_grad)
     @staticmethod
     def zeros(shape, requires_grad=False, **kwargs):
+        assert type(shape) == tuple
         return Tensor(np.zeros(shape, **kwargs), requires_grad=requires_grad)
     @staticmethod
     def ones(shape, requires_grad=False, **kwargs):
+        assert type(shape) == tuple
         return Tensor(np.ones(shape, **kwargs), requires_grad=requires_grad)
     @staticmethod 
     def eye(size, requires_grad=False, **kwargs):
@@ -91,6 +96,7 @@ class Tensor:
         return Tensor(np.ones_like(tensor.data, **kwargs), requires_grad=requires_grad)
     @staticmethod 
     def full(shape, fill_value, requires_grad=False, **kwargs):
+        assert type(shape) == tuple
         return Tensor(np.full(shape, fill_value, **kwargs), requires_grad=requires_grad)
     @staticmethod 
     def full_like(tensor, fill_value, requires_grad=False, **kwargs):
@@ -99,6 +105,9 @@ class Tensor:
     @staticmethod 
     def tri(size, requires_grad=False, **kwargs):
         return Tensor(np.tri(N=size, **kwargs), requires_grad=requires_grad)
+    @staticmethod
+    def arange(start, end, step=None, requires_grad=False, **kwargs):
+        return Tensor(np.arange(start, end, step, **kwargs), requires_grad=requires_grad)
 
     def triu(self, diag=0, **kwargs): return Tensor(np.triu(self.data, k=diag, **kwargs), requires_grad=self.requires_grad)
     def tril(self, diag=0, **kwargs): return Tensor(np.tril(self.data, k=diag, **kwargs), requires_grad=self.requires_grad)
@@ -162,6 +171,10 @@ class Tensor:
     def size(self): return self.data.size
     @property 
     def ndim(self): return self.data.ndim
+    def item(self): 
+        assert self.size == 1 
+        return self.data.item()
+        
 
     def transpose(self, axes=None): return Transpose.apply(self, axes)
     @property 
@@ -176,10 +189,17 @@ class Tensor:
         if not isinstance(others, (list, tuple)):
             others = [others]
         return Stack.apply([self] + others, dim)
-    def masked_fill(self, condition, value):
-        return MaskedFill.apply(self, condition, value)
-    def repeat(self, shape):
-        return Tensor.ones(shape) * self
+    def masked_fill(self, condition, value): return MaskedFill.apply(self, condition, value)
+    def repeat(self, shape): return Tensor.ones(shape) * self
+    @staticmethod 
+    def argmax(tensor, dim=None, keepdim=None): 
+        return Tensor(np.argmax(tensor.data, axis=dim, keepdims=keepdim), requires_grad=tensor.requires_grad)
+    @staticmethod 
+    def argmin(tensor, dim=None, keepdim=None): 
+        return Tensor(np.argmin(tensor.data, axis=dim, keepdims=keepdim), requires_grad=tensor.requires_grad)
+    @staticmethod 
+    def argsort(tensor, dim=None, keepdim=None): 
+        return Tensor(np.argsort(tensor.data, axis=dim, keepdims=keepdim), requires_grad=tensor.requires_grad)
 
     def cross_entropy(self, other): return CELoss.apply(self, to_tensor(other))
 

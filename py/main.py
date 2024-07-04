@@ -2,15 +2,11 @@ from tensor import *
 from layers import *
 
 if __name__=="__main__":
-    x = Tensor.randn((1, 10), requires_grad=True)
-    y = Tensor.randn((1, 10), requires_grad=True)
+    x = Tensor.rand((1, 10))
 
-    z = x.cross_entropy(y)
-    z.backward()
-
+    
     print(x)
-    print(y)
-    print(z)
+    print(Tensor.argmax(x))
+    print(Tensor.argmin(x))
+    print(Tensor.argsort(x))
 
-    print(x.grad)
-    print(y.grad)

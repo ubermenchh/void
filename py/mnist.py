@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 BATCH_SIZE = 32
 EPOCHS = 10
-LR = 3e-4
+LR = 1e-3
 
 def fetch_mnist():
     data_folder = "../data"
@@ -66,7 +66,7 @@ class SimpleNN(Module):
 
 def one_hot(labels): return np.eye(10)[labels]
 def get_batch(images, labels):
-    indices = list(range(0, len(images.data), BATCH_SIZE))
+    indices = list(range(0, len(images), BATCH_SIZE))
     random.shuffle(indices)
     for i in indices:
         yield images[i:i+BATCH_SIZE], labels[i:i+BATCH_SIZE]
@@ -75,7 +75,7 @@ def train(model, train_images, train_labels, optimizer, loss_fn):
     model.train()
     for epoch in range(EPOCHS):
         batch_generator = get_batch(train_images, train_labels)
-        num_batches = len(train_images.data) // BATCH_SIZE 
+        num_batches = len(train_images) // BATCH_SIZE 
         
         with tqdm(total=num_batches) as pbar:
             for batch_im, batch_lbl in batch_generator:
@@ -89,7 +89,19 @@ def train(model, train_images, train_labels, optimizer, loss_fn):
                 pbar.update(1)
                 pbar.set_postfix({"Loss": float(loss.data)})
 
-        print(f"Epoch: {epoch}, Loss: {loss.data:.4f}")
+        print(f"Epoch: {epoch}, Loss: {loss.item():.4f}")
+
+def test(model, test_images, test_labels):
+    preds = model(test_images)
+    pred_idx = Tensor.argmax(preds, dim=-1).numpy()
+    test_labels = test_labels.numpy()
+
+    correct = 0 
+    for p, t in zip(pred_idx.reshape(-1), test_labels.reshape(-1)):
+        if p == t: correct += 1 
+
+    acc = correct / len(test_labels)
+    print(f"Test Accuracy: {acc:.2%}")
 
 if __name__=="__main__":
     x_train, y_train, x_test, y_test = fetch_mnist()
@@ -101,3 +113,4 @@ if __name__=="__main__":
     loss_fn = CrossEntropyLoss()
 
     train(model, x_train, y_train, optimizer, loss_fn)
+    test(model, x_test, y_test)
