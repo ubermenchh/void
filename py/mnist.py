@@ -1,7 +1,7 @@
 from tensor import *
 from layers import * 
 
-import os, gzip, urllib, random 
+import os, gzip, urllib.request, random 
 from tqdm import tqdm
 
 BATCH_SIZE = 32
@@ -9,7 +9,7 @@ EPOCHS = 10
 LR = 3e-4
 
 def fetch_mnist():
-    data_folder = "data"
+    data_folder = "../data"
     if not os.path.exists(data_folder):
         os.makedirs(data_folder)
 
