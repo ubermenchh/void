@@ -4,7 +4,7 @@ from tensor import *
 
 class Module:
     def __init__(self): pass 
-    def __call__(self, x): return self.forward(x)
+    def __call__(self, *args): return self.forward(*args)
     
     def parameters(self):
         params = []
@@ -107,6 +107,10 @@ class MeanSquaredError(Module):
         out = (y_pred - y_true)**2 
         out = out.mean()
         return out
+
+class CrossEntropyLoss(Module):
+    def __init__(self): super().__init__()
+    def forward(self, y_pred, y_true): return y_pred.cross_entropy(y_true)
 
 class Optim:
     def __init__(self): pass 

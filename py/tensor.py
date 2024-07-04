@@ -1,5 +1,4 @@
 import numpy as np
-import math
 
 # Helper Functions
 def is_tensor(obj): return isinstance(obj, Tensor)
@@ -161,6 +160,8 @@ class Tensor:
     def dtype(self): return self.data.dtype
     @property
     def size(self): return self.data.size
+    @property 
+    def ndim(self): return self.data.ndim
 
     def transpose(self, axes=None): return Transpose.apply(self, axes)
     @property 
@@ -179,6 +180,17 @@ class Tensor:
         return MaskedFill.apply(self, condition, value)
     def repeat(self, shape):
         return Tensor.ones(shape) * self
+
+    def cross_entropy(self, other): return CELoss.apply(self, to_tensor(other))
+
+def arange(start, stop, step=None, **kwargs):
+    return Tensor(np.arange(start, stop, step, **kwargs))
+def exp(tensor): return Tensor.exp(tensor)
+def log(tensor): return Tensor.log(tensor)
+def max(tensor, dim=None, keepdim=None): return Tensor.max(tensor, dim=dim, keepdim=keepdim)
+def min(tensor, dim=None, keepdim=None): return Tensor.min(tensor, dim=dim, keepdim=keepdim)
+def sum(tensor, dim=None, keepdim=None): return Tensor.sum(tensor, dim=dim, keepdim=keepdim)
+def mean(tensor, dim=None, keepdim=None): return Tensor.mean(tensor, dim=dim, keepdim=keepdim)
 
 # Tensor Operations
 class Function:
@@ -220,7 +232,8 @@ class Add(Function):
 
     @staticmethod
     def backward(ctx, grad):
-        return grad, grad
+        a, b = ctx.saved_tensors 
+        return grad if a.requires_grad else None, grad if b.requires_grad else None
 
 class Sub(Function):
     @staticmethod
@@ -420,7 +433,6 @@ class Mean(Function):
 
     @staticmethod
     def backward(ctx, grad):
-        a, = ctx.saved_tensors
         num_el, input_shape = ctx.num_el, ctx.input_shape
         
         grad_input = np.broadcast_to(grad.data / num_el, input_shape)
@@ -430,13 +442,13 @@ class Var(Function):
     @staticmethod
     def forward(ctx, a, dim, keepdim):
         ctx.save_for_backward(a)
-        ctx.dim, ctx.keepdim = dim, keepdim
+        ctx.dim = dim
         return Tensor(a.data.var(axis=dim, keepdims=keepdim), requires_grad=a.requires_grad)
 
     @staticmethod
     def backward(ctx, grad):
         a, = ctx.saved_tensors
-        dim, keepdim = ctx.dim, ctx.keepdim
+        dim = ctx.dim
 
         if a.requires_grad:
             grad_a = np.ones_like(a.data) * grad.data 
@@ -481,7 +493,6 @@ class Transpose(Function):
 
     @staticmethod
     def backward(ctx, grad):
-        a, = ctx.saved_tensors
         axes = ctx.axes
         grad_a = np.transpose(grad, *axes)
         return grad_a, None 
@@ -547,7 +558,6 @@ class Stack(Function):
 
     @staticmethod
     def backward(ctx, grad):
-        tensors, = ctx.saved_tensors
         dim = ctx.dim
         grad_data = grad.data
         grads = np.split(grad_data, grad_data.shape[dim], axis=dim)
@@ -564,8 +574,28 @@ class MaskedFill(Function):
     @staticmethod
     def backward(ctx, grad):
         a, = ctx.saved_tensors
-        condition, value = ctx.condition, ctx.value
+        condition, _ = ctx.condition, ctx.value
         if a.requires_grad:
             grad_a = np.where(condition, grad.data, 0)
             return grad_a, None 
         return None, None
+
+class CELoss(Function): # Cross Entropy Loss
+    @staticmethod 
+    def forward(ctx, y_pred, y_true):
+        ctx.save_for_backward(y_pred, y_true)
+        exps = np.exp(y_pred.data - np.max(y_pred.data, axis=1, keepdims=True))
+        probs = exps / np.sum(exps, axis=1, keepdims=True) + 1e-22
+        log_l = -np.log(probs[np.arange(len(y_true.data)), y_true.data.astype(int)])
+        return Tensor(log_l.mean())
+
+    @staticmethod 
+    def backward(ctx, grad):
+        y_pred, y_true = ctx.saved_tensors
+        exps = np.exp(y_pred.data - np.max(y_pred.data, axis=1, keepdims=True)) + 1e-22 
+        probs = exps / np.sum(exps, axis=1, keepdims=True)
+        dloss = np.zeros_like(probs)
+        dloss[np.arange(len(y_true.data)), y_true.data.astype(int)] -= 1 
+        dloss += probs 
+        dloss /= len(y_true.data)
+        return [dloss * grad.data, None]
