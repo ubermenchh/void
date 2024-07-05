@@ -26,9 +26,11 @@ struct Context {
 Tensor* init_tensor(Matrix* data, bool requires_grad);
 void free_tensor(Tensor* t);
 void print_tensor(Tensor* t);
+void print_tensor_grad(Tensor* t);
 void tensor_shape(Tensor* t);
 
 // Backward function
+Context* init_context(void(*_backward)(Context*, Tensor*), Tensor** saved_tensors, int tensor_count);
 void backward(Tensor* tensor);
 
 // Tensor Initialization
@@ -47,7 +49,8 @@ Tensor* tensor_mask(int rows, int cols, double prob, bool requires_grad);
 Tensor* tensor_add(Tensor* a, Tensor* b);
 void add_backward(Context* ctx, Tensor* grad_output);
 
-//Tensor* tensor_sub(Tensor* a, Tensor* b);
+Tensor* tensor_sub(Tensor* a, Tensor* b);
+void sub_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_multiply(Tensor* a, Tensor* b);
 void mul_backward(Context* ctx, Tensor* grad_output);
@@ -55,7 +58,6 @@ void mul_backward(Context* ctx, Tensor* grad_output);
 Tensor* tensor_sum(Tensor* a);
 void sum_backward(Context* ctx, Tensor* grad_output);
 
-/*
 Tensor* tensor_negate(Tensor* a);
 void neg_backward(Context* ctx, Tensor* grad_output);
 
@@ -143,6 +145,4 @@ void free_dropout(Dropout* dp);
 Tensor* dropout_forward(Dropout* dp, Tensor* input);
 
 Tensor* mse(Tensor* y_true, Tensor* y_pred);
-void mse_backward(Tensor* grad_output, Tensor* out);
-
-*/
+void mse_backward(Context* ctx, Tensor* grad_output);

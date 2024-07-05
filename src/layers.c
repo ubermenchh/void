@@ -99,32 +99,22 @@ Tensor* mse(Tensor* y_true, Tensor* y_pred) {
     Tensor* out = tensor_mean(sqr, -1); // -1 for overall mean 
     
     if (out->requires_grad) {
-        out->ctx = init_context();
-        Tensor* saved_tensors[3] = {y_true, y_pred};
-        save_for_backward(out->ctx, saved_tensors, 2, NULL, 0);
-        out->grad_fn = mse_backward;
+        Tensor* saved_tensors[2] = {y_true, y_pred};
+        out->_ctx = init_context(mse_backward, saved_tensors, 2);
     }
-
     free_tensor(sqr);
     free_tensor(diff);
-
     return out;
 }
 
-void mse_backward(Tensor* grad_output, Tensor* out) {
-    Tensor* y_true = out->ctx->saved_tensors[0];
-    Tensor* y_pred = out->ctx->saved_tensors[1];
+void mse_backward(Context* ctx, Tensor* grad_output) {
+    Tensor* y_true = ctx->saved_tensors[0];
+    Tensor* y_pred = ctx->saved_tensors[1];
     double scale = 2.0 / y_pred->data->rows*y_pred->data->cols;
 
     if (y_pred->requires_grad) {
         Matrix* dmse = MatrixScalarMul(MatrixSub(y_true->data, y_pred->data), scale);
-        Matrix* grad_input = MatrixMultiply(dmse, grad_output->data);
-        
-        tensor_backward(y_pred, grad_input);
+        y_pred->grad = init_tensor(MatrixMultiply(dmse, grad_output->data), false);
         FreeMatrix(dmse);
-        FreeMatrix(grad_input);
     }
-
-    free_context(out->ctx);
-    out->ctx = NULL;
 }
