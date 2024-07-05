@@ -1,32 +1,35 @@
 #include <flash.h>
 #include <stdbool.h>
 
+#define TABLE_SIZE 1024
 
-typedef struct Tensor {
+typedef struct Tensor Tensor;
+typedef struct Context Context;
+
+struct Tensor {
     Matrix* data;
-    Matrix* grad;
     bool requires_grad;
-    void (*grad_fn)(struct Tensor*, struct Tensor*);
-    struct Context* ctx;
-} Tensor;
+    
+    Tensor* grad;
+    Context* _ctx;
+};
 
-typedef struct Context {
+struct Context {
+    void (*_backward) (Context*, Tensor* grad_output);
     Tensor** saved_tensors;
-    int num_saved_tensors;
-    double* saved_scalars; 
-    int num_saved_scalars;
-} Context;
+    int saved_tensors_count;
+};
+
+
 
 // Utility Functions
 Tensor* init_tensor(Matrix* data, bool requires_grad);
 void free_tensor(Tensor* t);
-void save_for_backward(Context* ctx, Tensor** tensors, int num_tensors, double* scalars, int num_scalars);
 void print_tensor(Tensor* t);
-void print_tensor_grad(Tensor* t);
-void tensor_backward(Tensor* t, Matrix* grad);
 void tensor_shape(Tensor* t);
-Context* init_context();
-void free_context(Context* ctx);
+
+// Backward function
+void backward(Tensor* tensor);
 
 // Tensor Initialization
 Tensor* tensor_rand(int rows, int cols, bool requires_grad, int seed);
@@ -42,67 +45,68 @@ Tensor* tensor_mask(int rows, int cols, double prob, bool requires_grad);
 
 // Tensor Operations
 Tensor* tensor_add(Tensor* a, Tensor* b);
-void add_backward(Tensor* grad_out, Tensor* out);
+void add_backward(Context* ctx, Tensor* grad_output);
 
-Tensor* tensor_sub(Tensor* a, Tensor* b);
+//Tensor* tensor_sub(Tensor* a, Tensor* b);
 
 Tensor* tensor_multiply(Tensor* a, Tensor* b);
-void mul_backward(Tensor* grad_out, Tensor* out);
+void mul_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_sum(Tensor* a);
-void sum_backward(Tensor* grad_out, Tensor* out);
+void sum_backward(Context* ctx, Tensor* grad_output);
 
+/*
 Tensor* tensor_negate(Tensor* a);
-void neg_backward(Tensor* grad_out, Tensor* out);
+void neg_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_divide(Tensor* a, Tensor* b);
-void div_backward(Tensor* grad_out, Tensor* out);
+void div_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_matmul(Tensor* a, Tensor* b);
-void matmul_backward(Tensor* grad_out, Tensor* out);
+void matmul_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_max(Tensor* input, int dim);
-void max_backward(Tensor* grad_output, Tensor* out);
+void max_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_min(Tensor* input, int dim);
-void min_backward(Tensor* grad_output, Tensor* out);
+void min_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_pow(Tensor* input, double power);
-void pow_backward(Tensor* grad_output, Tensor* out);
+void pow_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_log(Tensor* input);
-void log_backward(Tensor* grad_output, Tensor* out);
+void log_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_sqrt(Tensor* input);
 
 Tensor* tensor_sin(Tensor* input);
-void sin_backward(Tensor* grad_output, Tensor* out);
+void sin_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_cos(Tensor* input);
-void cos_backward(Tensor* grad_output, Tensor* out);
+void cos_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_exp(Tensor* input);
-void exp_backward(Tensor* grad_output, Tensor* out);
+void exp_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_mean(Tensor* input, int dim);
-void mean_backward(Tensor* grad_output, Tensor* out);
+void mean_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_std(Tensor* input, int dim);
-void std_backward(Tensor* grad_output, Tensor* out);
+void std_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_var(Tensor* input, int dim);
 
 Tensor* tensor_transpose(Tensor* input);
-void transpose_backward(Tensor* grad_output, Tensor* out);
+void transpose_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_reshape(Tensor* input, int rows, int cols);
-void reshape_backward(Tensor* grad_output, Tensor* out);
+void reshape_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_concat(Tensor* a, Tensor* b, int dim);
-void concat_backward(Tensor* grad_output, Tensor* out);
-
+void concat_backward(Context* ctx, Tensor* grad_output);
+    
 Tensor* tensor_relu(Tensor* input);
-void relu_backward(Tensor* grad_output, Tensor* out);
+void relu_backward(Context* ctx, Tensor* grad_output);
 
 // Layers
 typedef struct {
@@ -112,8 +116,6 @@ typedef struct {
 
     Tensor* weight;
     Tensor* bias;
-
-    Tensor** parameters;
 } Linear;
 
 Linear* init_linear(int in_dim, int out_dim, bool has_bias);
@@ -142,3 +144,5 @@ Tensor* dropout_forward(Dropout* dp, Tensor* input);
 
 Tensor* mse(Tensor* y_true, Tensor* y_pred);
 void mse_backward(Tensor* grad_output, Tensor* out);
+
+*/

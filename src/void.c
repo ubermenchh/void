@@ -3,53 +3,82 @@
 Tensor* init_tensor(Matrix* data, bool requires_grad) {
     Tensor* tensor = (Tensor*)malloc(sizeof(Tensor));
     tensor->data = MatrixCopy(data);
-    tensor->grad = NULL;
     tensor->requires_grad = requires_grad;
-    tensor->grad_fn = NULL;
-    tensor->ctx = NULL;
+    tensor->grad = NULL;
+    tensor->_ctx = NULL;
 
     return tensor;
 }
 
-void free_tensor(Tensor* t) {
-    FreeMatrix(t->data);
-    if (t->grad != NULL) {
-        FreeMatrix(t->grad);
+void free_tensor(Tensor* tensor) {
+    if (tensor != NULL) return;
+    if (tensor->data != NULL) FreeMatrix(tensor->data);
+    if (tensor->grad != NULL) free_tensor(tensor->grad);
+    if (tensor->_ctx != NULL) {
+        if (tensor->_ctx->saved_tensors != NULL) 
+            free(tensor->_ctx->saved_tensors);
+        free(tensor->_ctx);
     }
-    free(t);
+    free(tensor);
 }
 
-Context* init_context() {
+Context* init_context(void(*_backward)(Context*, Tensor*), Tensor** saved_tensors, int tensor_count) {
     Context* ctx = (Context*)malloc(sizeof(Context));
-    ctx->saved_tensors = NULL;
-    ctx->num_saved_tensors = 0;
-    ctx->saved_scalars = NULL;
-    ctx->num_saved_scalars = 0;
+    if (ctx == NULL) return NULL;
+
+    ctx->_backward = _backward;
+    ctx->saved_tensors = (Tensor**)malloc(tensor_count * sizeof(Tensor*));
+    if (ctx->saved_tensors == NULL) {
+        free(ctx);
+        return NULL;
+    }
+
+    memcpy(ctx->saved_tensors, saved_tensors, tensor_count * sizeof(Tensor*));
+    ctx->saved_tensors_count = tensor_count;
+
     return ctx;
 }
 
-void free_context(Context* ctx) {
-    if (ctx) {
-        free(ctx->saved_tensors);
-        free(ctx->saved_scalars);
-        free(ctx);
+void build_topo(Tensor* tensor, Tensor** visited, int* visited_count, Tensor** nodes, int* nodes_count) {
+    bool found = false;
+    for (int i = 0; i < *visited_count; i++) {
+        if (visited[i] == tensor) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        visited[*visited_count] = tensor;
+        (*visited_count)++;
+        if (tensor->_ctx) {
+            for (int i = 0; i < tensor->_ctx->saved_tensors_count; i++) {
+                build_topo(tensor->_ctx->saved_tensors[i], visited, visited_count, nodes, nodes_count);
+            }
+        }
+        nodes[*nodes_count] = tensor;
+        (*nodes_count)++;
     }
 }
 
-void save_for_backward(Context* ctx, Tensor** tensors, int num_tensors, double* scalars, int num_scalars) {
-    if (num_tensors > 0) {
-        ctx->saved_tensors = (Tensor**)malloc(num_tensors * sizeof(Tensor*)); 
-        for (int i = 0; i < num_tensors; i++) {
-            ctx->saved_tensors[i] = tensors[i];
-        }
-        ctx->num_saved_tensors = num_tensors;
+void backward(Tensor* tensor) {
+    if (!tensor->_ctx) return;
+    if (tensor->data->rows * tensor->data->cols != 1) {
+        fprintf(stderr, "backward can only be called for scalar tensors, but got a tensor of shape (%d, %d)\n", tensor->data->rows, tensor->data->cols);
+        exit(1);
     }
-    if (num_scalars > 0) {
-        ctx->saved_scalars = (double*)malloc(num_scalars * sizeof(double));
-        for (int i = 0; i < num_scalars; i++) {
-            ctx->saved_scalars[i] = scalars[i];
+    if (!tensor->grad) tensor->grad = tensor_ones(1, 1, false);
+
+    Tensor* visited[1000]; // assuming max of 1000 tensors 
+    int visited_count = 0;
+    Tensor* nodes[1000];
+    int nodes_count = 0;
+    build_topo(tensor, visited, &visited_count, nodes, &nodes_count);
+
+    for (int i = nodes_count - 1; i >= 0; i--) {
+        Tensor* t = nodes[i];
+        if (t->_ctx) {
+            t->_ctx->_backward(t->_ctx, t->grad);
         }
-        ctx->num_saved_scalars = num_scalars;
     }
 }
 
@@ -106,9 +135,9 @@ void print_tensor_grad(Tensor* t) {
     double max_val = 0.0;
     double min_val = 0.0;
 
-    for (int i = 0; i < t->grad->rows; i++) {
-        for (int j = 0; j < t->grad->cols; j++) {
-            double val = fabs(MAT_AT(t->grad, i, j));
+    for (int i = 0; i < t->grad->data->rows; i++) {
+        for (int j = 0; j < t->grad->data->cols; j++) {
+            double val = fabs(MAT_AT(t->grad->data, i, j));
             if (val > max_val) {
                 max_val = val;
             }
@@ -126,16 +155,16 @@ void print_tensor_grad(Tensor* t) {
     
     if (t->requires_grad) {
         printf("Tensor(grad=(\n[");
-        for (int i = 0; i < t->grad->rows; i++) {
+        for (int i = 0; i < t->grad->data->rows; i++) {
             if (i == 0) {
                 printf("[");
             } else {
                 printf(" [");
             }
-            for (int j = 0; j < t->grad->cols; j++) {
-                printf("%*.*f ", max_digits, 5, MAT_AT(t->grad, i, j));
+            for (int j = 0; j < t->grad->data->cols; j++) {
+                printf("%*.*f ", max_digits, 5, MAT_AT(t->grad->data, i, j));
             }
-            if (i != t->grad->rows-1) {
+            if (i != t->grad->data->rows-1) {
                 printf(" ]\n");
             } else {
                 printf(" ]");
@@ -153,23 +182,6 @@ void tensor_shape(Tensor* t) {
     printf("Shape: (%d, %d)\n", t->data->rows, t->data->cols);
 }
 
-void tensor_backward(Tensor* t, Matrix* grad) {
-    if (grad == NULL) {
-        grad = MatrixOnesLike(t->data);
-    }
-    if (t->grad == NULL) {
-        t->grad = MatrixCopy(grad);
-    } else {
-        Matrix* temp = MatrixAdd(t->grad, grad);
-        FreeMatrix(t->grad);
-        t->grad = temp;
-    }
-    if (t->grad_fn != NULL) {
-        Tensor grad_output;
-        grad_output.data = t->grad;
-        t->grad_fn(&grad_output, t);
-    }
-}
 
 Tensor* tensor_rand(int rows, int cols, bool requires_grad, int seed) {
     return init_tensor(RandMatrix(rows, cols, seed), requires_grad);
@@ -213,38 +225,31 @@ Tensor* tensor_mask(int rows, int cols, double prob, bool requires_grad) {
 
 Tensor* tensor_add(Tensor* a, Tensor* b) {
     // out = a + b
-    Tensor* out = init_tensor(MatrixAdd(a->data, b->data), a->requires_grad || b->requires_grad);
+    Tensor* out = init_tensor(
+            MatrixAdd(a->data, b->data), a->requires_grad || b->requires_grad
+    );
 
     if (out->requires_grad) {
-        out->ctx = init_context();
-        if (out->ctx == NULL) {
-            printf("Failed to allocate memory for context.\n");
-            return NULL;
-        }
-
         Tensor* saved_tensors[2] = {a, b};
-        save_for_backward(out->ctx, saved_tensors, 2, NULL, 0);
-        out->grad_fn = add_backward;
+        out->_ctx = init_context(add_backward, saved_tensors, 2);
     }
     return out;
 }
 
-void add_backward(Tensor* grad_output, Tensor* out) {
-    Tensor* a = out->ctx->saved_tensors[0];
-    Tensor* b = out->ctx->saved_tensors[1];
+void add_backward(Context* ctx, Tensor* grad_output) {
+    Tensor* a = ctx->saved_tensors[0];
+    Tensor* b = ctx->saved_tensors[1];
 
     if (a->requires_grad) {
-        // grad_a = 1 * grad_output
-        tensor_backward(a, grad_output->data);
+        a->grad = init_tensor(MatrixZerosLike(a->data), false);
+        a->grad->data = grad_output->data;
     } 
     if (b->requires_grad) {
-        // grad_b = 1 * grad_output
-        tensor_backward(b, grad_output->data);
+        b->grad = init_tensor(MatrixZerosLike(b->data), false);
+        b->grad->data = grad_output->data;
     }
-    free_context(out->ctx);
-    out->ctx = NULL;
 }
-
+/*
 Tensor* tensor_sub(Tensor* a, Tensor* b) {
     Tensor* neg_b = tensor_negate(b);
     Tensor* out = tensor_add(a, neg_b);
@@ -252,7 +257,7 @@ Tensor* tensor_sub(Tensor* a, Tensor* b) {
     free_tensor(neg_b);
     return out;
 }
-
+*/
 Tensor* tensor_multiply(Tensor* a, Tensor* b) {
     // out = a*b
     Tensor* out = init_tensor(
@@ -260,75 +265,50 @@ Tensor* tensor_multiply(Tensor* a, Tensor* b) {
     );
 
     if (out->requires_grad) {
-        out->ctx = init_context();
-        if (out->ctx == NULL) {
-            printf("Failed to allocate memory for context.\n");
-            return NULL;
-        }
-
         Tensor* saved_tensors[2] = {a, b};
-        save_for_backward(out->ctx, saved_tensors, 2, NULL, 0);
-        out->grad_fn = mul_backward;
+        out->_ctx = init_context(mul_backward, saved_tensors, 2);
     } 
     return out;
 }
 
-void mul_backward(Tensor* grad_output, Tensor* out) {
-    Tensor* a = out->ctx->saved_tensors[0];
-    Tensor* b = out->ctx->saved_tensors[1];
+void mul_backward(Context* ctx, Tensor* grad_output) {
+    Tensor* a = ctx->saved_tensors[0];
+    Tensor* b = ctx->saved_tensors[1];
 
     if (a->requires_grad) {
         // grad_a = b * grad_output
-        Matrix* grad_a = MatrixMultiply(grad_output->data, b->data);
-        tensor_backward(a, grad_a);
-        FreeMatrix(grad_a);
+        a->grad->data = MatrixMultiply(grad_output->data, b->data);
     }
     if (b->requires_grad) {
         // grad_b = a * grad_output
-        Matrix* grad_b = MatrixMultiply(grad_output->data, a->data);
-        tensor_backward(b, grad_b);
-        FreeMatrix(grad_b);
+        b->grad->data = MatrixMultiply(grad_output->data, a->data);
     }
-    free_context(out->ctx);
-    out->ctx = NULL;
 }
 
 Tensor* tensor_sum(Tensor* a) {
     // Sum of all elements of a Tensor
     Matrix* sum_matrix = InitMatrix(1, 1);
-    sum_matrix->data[0] = MatrixSum(a->data); // MatrixSum return a double 
+    sum_matrix->data[0] = MatrixSum(a->data); // MatrixSum returns a double 
 
     Tensor* output = init_tensor(sum_matrix, a->requires_grad);
 
     if (output->requires_grad) {
-        output->grad_fn = sum_backward;
-        output->ctx = init_context(); 
         Tensor* saved_tensors[1] = {a};
-        save_for_backward(output->ctx, saved_tensors, 1, NULL, 0);
+        output->_ctx = init_context(sum_backward, saved_tensors, 1);
     }
-
-    FreeMatrix(sum_matrix);
     return output;
 }
 
-void sum_backward(Tensor* grad_output, Tensor* out) {
-    Context* ctx = out->ctx;
+void sum_backward(Context* ctx, Tensor* grad_output) {
     Tensor* input = ctx->saved_tensors[0];
 
     if (input->requires_grad) {
-        Matrix* grad_input = MatrixOnesLike(input->data);
-        
-        for (int i = 0; i < grad_input->rows * grad_input->cols; i++) {
-            grad_input->data[i] *= grad_output->data->data[0];
-        }
-
-        tensor_backward(input, grad_input);
-        FreeMatrix(grad_input);
+        input->grad = init_tensor(MatrixOnesLike(input->data), false);
+        input->grad->data = MatrixScalarMul(input->grad->data, grad_output->data->data[0]);
     }
-    free_context(out->ctx);
-    out->ctx = NULL;
 }
 
+/*
 Tensor* tensor_negate(Tensor* input) {
     // Return a negative picture of all the elements of a Tensor
     Tensor* out = init_tensor(MatrixNeg(input->data), input->requires_grad);
@@ -934,3 +914,4 @@ void relu_backward(Tensor* grad_output, Tensor* out) {
     free_context(out->ctx);
     out->ctx = NULL;
 }
+*/
