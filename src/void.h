@@ -108,12 +108,18 @@ void reshape_backward(Context* ctx, Tensor* grad_output);
 // Concatenates two tensors along a dim (0: row-wise, 1: col-wise)
 Tensor* tensor_concat(Tensor* a, Tensor* b, int dim);
 void concat_backward(Context* ctx, Tensor* grad_output);
+
+Tensor* tensor_slice(Tensor* tensor, int from_rows, int to_rows, int from_cols, int to_cols);
 // ReLU Activation Function
 Tensor* tensor_relu(Tensor* input);
 void relu_backward(Context* ctx, Tensor* grad_output);
 // Mean Squared Error
 Tensor* mse(Tensor* y_pred, Tensor* y_true);
 void mse_backward(Context* ctx, Tensor* grad_output);
+// Cross-Entropy Loss 
+Tensor* ce_loss(Tensor* output, Tensor* target);
+// Softmax
+Tensor* softmax(Tensor* tensor);
 
 /* Layers */
 typedef struct Module Module;

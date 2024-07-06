@@ -548,6 +548,24 @@ Tensor* tensor_sqrt(Tensor* input) {
     return tensor_pow(input, 0.5);
 }
 
+Tensor* tensor_log(Tensor* input) {
+    Tensor* out = init_tensor(MatrixLog(input->data), input->requires_grad);
+    
+    if (out->requires_grad) {
+        Tensor* saved_tensors[1] = {input};
+        out->_ctx = init_context(log_backward, saved_tensors, 1);
+    }
+    return out;
+}
+
+void log_backward(Context* ctx, Tensor* grad_output) {
+    Tensor* input = ctx->saved_tensors[0];
+    if (input->requires_grad) {
+        // grad_input = 1 / input 
+        input->grad = init_tensor(MatrixReciprocal(input->data), false);
+    }
+}
+
 Tensor* tensor_sin(Tensor* input) {
     // out = sin(input);
     Tensor* out = init_tensor(MatrixSin(input->data), input->requires_grad);
@@ -809,6 +827,14 @@ void concat_backward(Context* ctx, Tensor* grad_output) {
             }
         }
     }
+}
+
+Tensor* tensor_slice(Tensor* tensor, int from_rows, int to_rows, int from_cols, int to_cols) {
+    Tensor* out = init_tensor(
+        MatrixSlice(tensor->data, from_rows, to_rows, from_cols, to_cols),
+        tensor->requires_grad
+    );
+    return out;
 }
 
 Tensor* tensor_relu(Tensor* input) {

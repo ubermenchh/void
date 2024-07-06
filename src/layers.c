@@ -80,9 +80,10 @@ void sgd_zero_grad(Optim* optim) {
     SGD* sgd = (SGD*)optim->impl;
     for (int i = 0; i < sgd->param_count; i++) {
         Tensor* param = sgd->params[i];
-        for (int j = 0; j < param->data->rows * param->data->cols; j++) {
-            param->grad->data->data[j] = 0.0;
-        }
+        param->grad = init_tensor(MatrixZerosLike(param->data), false);
+        //for (int j = 0; j < param->data->rows * param->data->cols; j++) {
+        //    param->grad->data->data[j] = 0.0;
+        //}
     }
 }
 
@@ -110,4 +111,34 @@ void mse_backward(Context* ctx, Tensor* grad_output) {
         y_pred->grad = init_tensor(MatrixMultiply(dmse, grad_output->data), false);
         FreeMatrix(dmse);
     }
+}
+
+Tensor* ce_loss(Tensor* output, Tensor* target) {
+    Tensor* log_output = tensor_log(output);
+    Tensor* neg_log_likelihood = tensor_multiply(target, log_output);
+    
+    Tensor* loss = tensor_mean(neg_log_likelihood, -1);
+    Tensor* neg_loss = tensor_negate(loss);
+
+
+    free_tensor(loss);
+    free_tensor(neg_log_likelihood);
+    free_tensor(log_output);
+
+    return neg_loss;
+}
+
+Tensor* softmax(Tensor* tensor) {
+    Tensor* max_vals = tensor_max(tensor, -1);
+    Tensor* shifted = tensor_sub(tensor, max_vals);
+    Tensor* exp_vals = tensor_exp(shifted);
+    Tensor* sum_exp = tensor_sum(exp_vals);
+    Tensor* out = tensor_divide(exp_vals, tensor_full_like(exp_vals, sum_exp->data->data[0], false));
+
+    free_tensor(sum_exp);
+    free_tensor(exp_vals);
+    free_tensor(shifted);
+    free_tensor(max_vals);
+
+    return out;
 }
