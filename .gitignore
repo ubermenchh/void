@@ -1,7 +1,12 @@
 py/test/
+py/__pycache__
+data/
+Makefile
 
 src/main
 src/main.c
+src/xor
+src/mnist
 
 build/libvoid.so
 build/void.o
