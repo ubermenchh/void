@@ -45,104 +45,111 @@ Tensor* tensor_full(int rows, int cols, double value, bool requires_grad);
 Tensor* tensor_full_like(Tensor* t, double value, bool requires_grad);
 Tensor* tensor_mask(int rows, int cols, double prob, bool requires_grad);
 
-// Tensor Operations
+/* Tensor Operations */
+
+// Adds two tensors, elementwise
 Tensor* tensor_add(Tensor* a, Tensor* b);
 void add_backward(Context* ctx, Tensor* grad_output);
-
+// Elementwise difference of two tensors
 Tensor* tensor_sub(Tensor* a, Tensor* b);
 void sub_backward(Context* ctx, Tensor* grad_output);
-
+// Multiplies two tensors, elementwise
 Tensor* tensor_multiply(Tensor* a, Tensor* b);
 void mul_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates the sum of the elements of a tensor
 Tensor* tensor_sum(Tensor* a);
 void sum_backward(Context* ctx, Tensor* grad_output);
-
+// Negates all the elements of a tensor
 Tensor* tensor_negate(Tensor* a);
 void neg_backward(Context* ctx, Tensor* grad_output);
-
+// Divides two tensors, elementwise
 Tensor* tensor_divide(Tensor* a, Tensor* b);
 void div_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates the Matrix Multiplication of 2 tensors
 Tensor* tensor_matmul(Tensor* a, Tensor* b);
 void matmul_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates the maximum of a tensor, (-1: all-elements, 0: row-wise, 1: col_wise)
 Tensor* tensor_max(Tensor* input, int dim);
 void max_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates the minimum of the tensor, (-1: all-elements, 0: row-wise, 1: col_wise)
 Tensor* tensor_min(Tensor* input, int dim);
 void min_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates x^y of the elements of a tensor
 Tensor* tensor_pow(Tensor* input, double power);
 void pow_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates the log(log10) of the elements of a tensor
 Tensor* tensor_log(Tensor* input);
 void log_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates the sqrt of elements of a tensor
 Tensor* tensor_sqrt(Tensor* input);
-
+// Calculates sine of the elements of a tensor
 Tensor* tensor_sin(Tensor* input);
 void sin_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates the cosine of the elements of a tensor
 Tensor* tensor_cos(Tensor* input);
 void cos_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates e^x of the elements of a tensor
 Tensor* tensor_exp(Tensor* input);
 void exp_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates mean of a tensor, (-1: all elements, 0: row-wise, 1: col_wise)
 Tensor* tensor_mean(Tensor* input, int dim);
 void mean_backward(Context* ctx, Tensor* grad_output);
-
+// Calculate standard deviation of a tensor, (-1: all elements, 0: row-wise, 1: col-wise)
 Tensor* tensor_std(Tensor* input, int dim);
 void std_backward(Context* ctx, Tensor* grad_output);
-
+// Calculates the variance of the tensor, (-1: all the elements, 0: row-wise, 1: col_wise)
 Tensor* tensor_var(Tensor* input, int dim);
-
+// Transposes the given tensor
 Tensor* tensor_transpose(Tensor* input);
 void transpose_backward(Context* ctx, Tensor* grad_output);
-
+// Reshape a given tensor
 Tensor* tensor_reshape(Tensor* input, int rows, int cols);
 void reshape_backward(Context* ctx, Tensor* grad_output);
-
+// Concatenates two tensors along a dim (0: row-wise, 1: col-wise)
 Tensor* tensor_concat(Tensor* a, Tensor* b, int dim);
 void concat_backward(Context* ctx, Tensor* grad_output);
-    
+// ReLU Activation Function
 Tensor* tensor_relu(Tensor* input);
 void relu_backward(Context* ctx, Tensor* grad_output);
+// Mean Squared Error
+Tensor* mse(Tensor* y_pred, Tensor* y_true);
+void mse_backward(Context* ctx, Tensor* grad_output);
 
-// Layers
+/* Layers */
+typedef struct Module Module;
+
+struct Module {
+    Tensor* (*forward)(Module*, Tensor*);
+    Tensor** (*parameters)(Module*, int*);
+    void* derived; // pointer to derived struct 
+};
+Tensor** module_parameters(Module* module, int* count);
+
 typedef struct {
-    int in_dim;
-    int out_dim;
-    bool has_bias;
-
+    Module base;
     Tensor* weight;
     Tensor* bias;
+    bool has_bias;
 } Linear;
-
 Linear* init_linear(int in_dim, int out_dim, bool has_bias);
-void free_linear(Linear* lin);
-Tensor* linear_forward(Linear* lin, Tensor* input);
+void free_linear(Linear* linear);
+Tensor* linear_forward(Module* module, Tensor* input);
+Tensor** linear_parameters(Module* module, int* count);
 
 typedef struct {
-    int n_embed;
-    Tensor* gamma;
-    Tensor* beta;
-} LayerNorm;
-
-LayerNorm* init_layernorm(int n_embed);
-void free_layernorm(LayerNorm* ln);
-Tensor* layernorm_forward(LayerNorm* ln, Tensor* input);
+    void (*step)(void*);
+    void (*zero_grad)(void*);
+    void* dervied;
+} Optim;
 
 typedef struct {
-    double drop_prob;
-    bool train_mode;
-    Tensor* mask;
-} Dropout;
+    Optim base;
+    Tensor** params;
+    int param_count;
 
-Dropout* init_dropout(double drop_prob);
-void free_dropout(Dropout* dp);
-Tensor* dropout_forward(Dropout* dp, Tensor* input);
-
-Tensor* mse(Tensor* y_true, Tensor* y_pred);
-void mse_backward(Context* ctx, Tensor* grad_output);
+    double lr;
+} SGD;
+void sgd_step(void* optim);
+void sgd_zero_grad(void* optim);
+SGD* init_sgd(Tensor** params, int param_count, double lr);
+void free_sgd(SGD* sgd);

@@ -1,96 +1,87 @@
 #include "void.h" 
 
+Tensor** module_parameters(Module* module, int* count) {
+    if (module->derived && module->parameters) {
+        return module_parameters(module, count);
+    }
+    *count = 0;
+    return NULL;
+}
+
 Linear* init_linear(int in_dim, int out_dim, bool has_bias) {
-    // Initializes a Linear Layer
-    Linear* lin = (Linear*)malloc(sizeof(Linear));
-    lin->in_dim = in_dim;
-    lin->out_dim = out_dim;
-    lin->has_bias = has_bias;
-
-    lin->weight = tensor_randn(in_dim, out_dim, true, 0);
+    // Initializes a Linear Layer 
+    Linear* linear = (Linear*)malloc(sizeof(Linear));
+    linear->weight = tensor_randn(in_dim, out_dim, true, 0);
     if (has_bias) {
-        lin->bias = tensor_zeros(1, out_dim, true);
+        linear->bias = tensor_zeros(1, out_dim, true);
     } else {
-        lin->bias = NULL;
+        linear->bias = NULL;
     }
-    return lin;
+    linear->has_bias = has_bias;
+
+    linear->base.forward = linear_forward;
+    linear->base.parameters = linear_parameters;
+    linear->base.derived = linear;
+
+    return linear;
 }
 
-void free_linear(Linear* lin) {
+void free_linear(Linear* linear) {
     // Frees an already Initialized linear layer
-    free_tensor(lin->weight);
-    free_tensor(lin->bias);
-    free(lin);
+    free_tensor(linear->weight);
+    if (linear->has_bias) free_tensor(linear->bias);
+    free(linear);
 }
 
-Tensor* linear_forward(Linear* lin, Tensor* input) {
-    // out = X@W.T + B
-    Tensor* out = tensor_matmul(input, lin->weight);
-
-    if (lin->has_bias) {
-        Tensor* biased = tensor_add(out, lin->bias);
-        free_tensor(out);
-        out = biased;
-    }
+Tensor* linear_forward(Module* module, Tensor* input) {
+    Linear* linear = (Linear*)module->derived;
+    Tensor* out = tensor_matmul(input, linear->weight);
+    if (linear->has_bias) out = tensor_add(out, linear->bias);
     return out;
 }
 
-LayerNorm* init_layernorm(int n_embed) {
-    LayerNorm* ln = (LayerNorm*)malloc(sizeof(LayerNorm));
-    
-    ln->gamma = tensor_ones(1, n_embed, true);
-    ln->beta = tensor_zeros(1, n_embed, true);
-
-    return ln;
+Tensor** linear_parameters(Module* module, int* count) {
+    Linear* linear = (Linear*)module->derived;
+    Tensor** params = (Tensor**)malloc(sizeof(Tensor*) * 2);
+    int idx = 0;
+    params[idx++] = linear->weight;
+    if (linear->has_bias) params[idx++] = linear->bias;
+    *count = idx;
+    return params;
 }
 
-void free_layernorm(LayerNorm* ln) {
-    free_tensor(ln->gamma);
-    free_tensor(ln->beta);
-    free(ln);
+SGD* init_sgd(Tensor** params, int param_count, double lr) {
+    SGD* sgd = (SGD*)malloc(sizeof(SGD));
+    sgd->params = params;
+    sgd->param_count = param_count;
+    sgd->lr = lr;
+
+    sgd->base.zero_grad = sgd_zero_grad;
+    sgd->base.step = sgd_step;
+    sgd->base.dervied = sgd;
+    return sgd;
 }
 
-Tensor* layernorm_forward(LayerNorm* ln, Tensor* input) {
-    Tensor* std_input = tensor_std(input, 1);
-    Tensor* mean_input = tensor_mean(input, 1);
-    Tensor* norm_input = tensor_divide(tensor_sub(input, mean_input), std_input);
-
-    free_tensor(std_input);
-    free_tensor(mean_input);
-
-    return norm_input;
+void free_sgd(SGD* sgd) {
+    free(sgd);
 }
 
-Dropout* init_dropout(double drop_prob) {
-    Dropout* dp = (Dropout*)malloc(sizeof(Dropout));
-    
-    dp->drop_prob = drop_prob;
-    dp->train_mode = true;
-    dp->mask = NULL;
-
-    return dp;
-}
-
-void free_dropout(Dropout* dp) {
-    if (dp->mask) {
-        free_tensor(dp->mask);
+void sgd_step(void* optim) {
+    SGD* sgd = (SGD*)optim;
+    for (int i = 0; i < sgd->param_count; i++) {
+        Tensor* param = sgd->params[i];
+        for (int j = 0; j < param->data->rows * param->data->cols; j++) {
+            param->data->data[j] -= sgd->lr * param->grad->data->data[j]; 
+        }
     }
-    free(dp);
 }
 
-Tensor* dropout_forward(Dropout* dp, Tensor* input) {
-    if (!dp->train_mode) {
-        return input;
+void sgd_zero_grad(void* optim) {
+    SGD* sgd = (SGD*)optim;
+    for (int i = 0; i < sgd->param_count; i++) {
+        Tensor* param = sgd->params[i];
+        param->grad->data = MatrixZerosLike(param->data);
     }
-    if (dp->mask) {
-        free_tensor(dp->mask);
-    }
-
-    dp->mask = tensor_mask(input->data->rows, input->data->cols, dp->drop_prob, false);
-    print_tensor(dp->mask);
-    Tensor* out = tensor_multiply(input, dp->mask);
-
-    return out; 
 }
 
 Tensor* mse(Tensor* y_true, Tensor* y_pred) {
