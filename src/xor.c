@@ -1,6 +1,6 @@
 #include "void.h"
 
-#define SEED 69
+#define SEED 1337
 
 typedef struct {
     Module base;
@@ -9,31 +9,52 @@ typedef struct {
 } MLP;
 
 Tensor* mlp_forward(Module* module, Tensor* input) {
-    MLP* mlp = (MLP*)module;
-
-    Tensor* out = linear_forward((Module*)mlp->l1, input);
+    MLP* mlp = (MLP*)module->impl;
+    Tensor* out = mlp->l1->base.forward((Module*)mlp->l1, input);
     out = tensor_relu(out);
-    out = linear_forward((Module*)mlp->l2, out);
+    out = mlp->l2->base.forward((Module*)mlp->l2, out);
 
     return out;
 }
 
-MLP* init_mlp(int in_dim, int hidden_dim, int out_dim) {
-    MLP* mlp = (MLP*)malloc(sizeof(MLP));
-
-    mlp->l1 = init_linear(in_dim, hidden_dim, true);
-    mlp->l2 = init_linear(hidden_dim, out_dim, true);
-
-    mlp->base.forward = mlp_forward;
-    return mlp;
-}
-
 void free_mlp(Module* module) {
-    MLP* mlp = (MLP*)module;
-    free_linear(mlp->l1);
-    free_linear(mlp->l2);
+    MLP* mlp = (MLP*)module->impl;
+    mlp->l1->base.free((Module*)mlp->l1);
+    mlp->l2->base.free((Module*)mlp->l2);
     free(mlp);
 }
+
+Tensor** mlp_parameters(Module* module, int* count) {
+    MLP* mlp = (MLP*)module->impl;
+    int count1, count2;
+    Tensor** params1 = mlp->l1->base.parameters((Module*)mlp->l1, &count1);
+    Tensor** params2 = mlp->l2->base.parameters((Module*)mlp->l2, &count2);
+
+    *count = count1 + count2;
+    Tensor** all_params = malloc(*count * sizeof(Tensor*));
+
+    for (int i = 0; i < count1; i++) all_params[i] = params1[i];
+    for (int i = 0; i < count2; i++) all_params[i + count1] = params2[i];
+
+    free_tensor(*params1);
+    free_tensor(*params2);
+
+    return all_params;
+}
+
+Module* init_mlp(int in_dim, int hidden_dim, int out_dim) {
+    MLP* mlp = malloc(sizeof(MLP));
+    mlp->base.impl = mlp;
+    mlp->base.forward = mlp_forward;
+    mlp->base.parameters = mlp_parameters;
+    mlp->base.free = free_mlp;
+
+    mlp->l1 = (Linear*)init_linear(in_dim, hidden_dim, true);
+    mlp->l2 = (Linear*)init_linear(hidden_dim, out_dim, true);
+    
+    return (Module*)mlp;
+}
+
 
 int main() {
     double x_train_data[] = {
@@ -55,37 +76,33 @@ int main() {
     Tensor* x_train = init_tensor(data_x, true);
     Tensor* y_train = init_tensor(data_y, true);
     
-    MLP* net = init_mlp(2, 4, 1);
-    int param_count1, param_count2;
-    Tensor** params1 = net->l1->base.parameters((Module*)net->l1, &param_count1);
-    Tensor** params2 = net->l2->base.parameters((Module*)net->l2, &param_count2);
-    Tensor** all_params = (Tensor**)malloc(sizeof(Tensor*) * (param_count1 + param_count2));
-    for (int i = 0; i < param_count1; i++) {
-        all_params[i] = params1[i];
-    } 
-    for (int i = 0; i < param_count2; i++) {
-        all_params[i + param_count1] = params2[i];
-    }
-    SGD* optimizer = init_sgd(all_params, param_count1 + param_count2, 0.01);
-    int epochs = 20;
+    Module* net = init_mlp(2, 6, 1);
+    int param_count;
+    Tensor** params = net->parameters(net, &param_count);
+    Optim* optimizer = init_sgd(params, param_count, 0.2);
+    
+    int epochs = 100;
     for (int epoch = 0; epoch < epochs; epoch++) {
-        Tensor* y_pred = net->base.forward((Module*)net, x_train);
+        Tensor* y_pred = net->forward(net, x_train);
         Tensor* loss = mse(y_train, y_pred);
+
         backward(loss);
-        optimizer->base.step(optimizer);
-        optimizer->base.zero_grad(optimizer);
+        optimizer->step(optimizer);
+        optimizer->zero_grad(optimizer);
 
         printf("Epoch: %d, Loss: %f\n", epoch, loss->data->data[0]);
 
         if (epoch == epochs-1) print_tensor(y_pred);
+
         free_tensor(y_pred);
         free_tensor(loss);
     } 
 
     free_tensor(x_train);
     free_tensor(y_train);
-    free(all_params);
-    free_sgd(optimizer);
+    free(params);
+    net->free(net);
+    optimizer->free(optimizer);
 
     return 0;
 }

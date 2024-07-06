@@ -117,39 +117,44 @@ void mse_backward(Context* ctx, Tensor* grad_output);
 
 /* Layers */
 typedef struct Module Module;
+typedef struct Linear Linear;
+typedef struct Optim Optim;
+typedef struct SGD SGD;
 
 struct Module {
-    Tensor* (*forward)(Module*, Tensor*);
-    Tensor** (*parameters)(Module*, int*);
-    void* derived; // pointer to derived struct 
+    void* impl;
+    Tensor* (*forward)(Module* self, Tensor* input);
+    Tensor** (*parameters)(Module* self, int* count);
+    void (*free)(Module* self);
 };
-Tensor** module_parameters(Module* module, int* count);
-
-typedef struct {
+struct Linear {
     Module base;
+    int in_dim;
+    int out_dim;
+
     Tensor* weight;
     Tensor* bias;
     bool has_bias;
-} Linear;
-Linear* init_linear(int in_dim, int out_dim, bool has_bias);
-void free_linear(Linear* linear);
-Tensor* linear_forward(Module* module, Tensor* input);
-Tensor** linear_parameters(Module* module, int* count);
-
-typedef struct {
-    void (*step)(void*);
-    void (*zero_grad)(void*);
-    void* dervied;
-} Optim;
-
-typedef struct {
+};
+struct Optim {
+    void* impl;
+    void (*step)(Optim* self);
+    void (*zero_grad)(Optim* self);
+    void (*free)(Optim* self);
+};
+struct SGD {
     Optim base;
     Tensor** params;
     int param_count;
-
     double lr;
-} SGD;
-void sgd_step(void* optim);
-void sgd_zero_grad(void* optim);
-SGD* init_sgd(Tensor** params, int param_count, double lr);
-void free_sgd(SGD* sgd);
+};
+
+Module* init_linear(int in_dim, int out_dim, bool has_bias);
+Tensor* linear_forward(Module* module, Tensor* input);
+Tensor** linear_parameters(Module* module, int* count);
+void free_linear(Module* module); 
+
+Optim* init_sgd(Tensor** params, int param_count, double lr);
+void sgd_step(Optim* optim);
+void sgd_zero_grad(Optim* optim);
+void free_sgd(Optim* optim);
