@@ -1,4 +1,5 @@
 #include "void.h"
+#include <flash.h>
 
 Tensor* init_tensor(Matrix* data, bool requires_grad) {
     Tensor* tensor = (Tensor*)malloc(sizeof(Tensor));
@@ -225,9 +226,7 @@ Tensor* tensor_mask(int rows, int cols, double prob, bool requires_grad) {
 
 Tensor* tensor_add(Tensor* a, Tensor* b) {
     // out = a + b
-    Tensor* out = init_tensor(
-            MatrixAdd(a->data, b->data), a->requires_grad || b->requires_grad
-    );
+    Tensor* out = init_tensor(MatrixAdd(a->data, b->data), a->requires_grad || b->requires_grad);
 
     if (out->requires_grad) {
         Tensor* saved_tensors[2] = {a, b};
@@ -241,20 +240,16 @@ void add_backward(Context* ctx, Tensor* grad_output) {
     Tensor* b = ctx->saved_tensors[1];
 
     if (a->requires_grad) {
-        a->grad = init_tensor(MatrixZerosLike(a->data), false);
-        a->grad->data = grad_output->data;
+        a->grad = tensor_add(a->grad, grad_output);
     } 
     if (b->requires_grad) {
-        b->grad = init_tensor(MatrixZerosLike(b->data), false);
-        b->grad->data = grad_output->data;
+        b->grad = tensor_add(b->grad, grad_output);
     }
 }
 
 Tensor* tensor_sub(Tensor* a, Tensor* b) {
     // out = a + b
-    Tensor* out = init_tensor(
-            MatrixSub(a->data, b->data), a->requires_grad || b->requires_grad
-    );
+    Tensor* out = init_tensor(MatrixSub(a->data, b->data), a->requires_grad || b->requires_grad);
 
     if (out->requires_grad) {
         Tensor* saved_tensors[2] = {a, b};
@@ -306,13 +301,17 @@ void mul_backward(Context* ctx, Tensor* grad_output) {
     }
 }
 
-Tensor* tensor_sum(Tensor* a) {
-    // Sum of all elements of a Tensor
-    Matrix* sum_matrix = InitMatrix(1, 1);
-    sum_matrix->data[0] = MatrixSum(a->data); // MatrixSum returns a double 
-
-    Tensor* output = init_tensor(sum_matrix, a->requires_grad);
-
+Tensor* tensor_sum(Tensor* a, int dim) {
+    Tensor* output;
+    if (dim == -1) {
+        // Sum of all elements of a Tensor
+        Matrix* sum_matrix = InitMatrix(1, 1);
+        sum_matrix->data[0] = MatrixSum(a->data); // MatrixSum returns a double 
+        output = init_tensor(sum_matrix, a->requires_grad);
+    } else {
+        output = init_tensor(MatrixSumVals(a->data, dim), a->requires_grad);
+    }
+   
     if (output->requires_grad) {
         Tensor* saved_tensors[1] = {a};
         output->_ctx = init_context(sum_backward, saved_tensors, 1);
@@ -322,10 +321,38 @@ Tensor* tensor_sum(Tensor* a) {
 
 void sum_backward(Context* ctx, Tensor* grad_output) {
     Tensor* input = ctx->saved_tensors[0];
+    Tensor* output = ctx->saved_tensors[1];
 
     if (input->requires_grad) {
-        input->grad = init_tensor(MatrixOnesLike(input->data), false);
-        input->grad->data = MatrixScalarMul(input->grad->data, grad_output->data->data[0]);
+        // Initialize input gradient tensor with same shape as input
+        input->grad = init_tensor(
+            ZerosMatrix(input->data->rows, input->data->cols),
+            true
+        );
+
+        if (output->data->rows == 1 && output->data->cols == 1) {
+            // Sum of all elements of a Tensor
+            double grad_value = grad_output->data->data[0]; 
+            int total_elements = input->data->rows * input->data->cols;
+            
+            for (int i = 0; i < total_elements; i++) {
+                input->grad->data->data[i] = grad_value;
+            }
+        } else {
+            // Sum along a dimension of a tensor
+            int dim = (output->data->rows == input->data->rows) ? 1 : 0;
+            int other_dim = 1 - dim;
+            int other_dim_size = (dim == 0) ? input->data->cols : input->data->rows;
+            int sum_dim_size = (dim == 0) ? input->data->rows : input->data->cols;
+
+            for (int i = 0; i < other_dim_size; i++) {
+                double grad_value = grad_output->data->data[i];
+                for (int j = 0; j < sum_dim_size; j++) {
+                    int index = (dim == 0) ? j * input->data->cols + i : i * input->data->cols + j;
+                    input->grad->data->data[index] = grad_value;
+                }
+            }
+        }
     }
 }
 
@@ -396,17 +423,15 @@ void matmul_backward(Context* ctx, Tensor* grad_output) {
 
     if (a->requires_grad) {
         // grad_a = grad_output @ b.T 
-        a->grad = init_tensor(
-                MatrixMul(grad_output->data, MatrixTranspose(b->data)), 
-                true
-        );
+        a->grad = tensor_add(a->grad, 
+                init_tensor(MatrixMul(grad_output->data, MatrixTranspose(b->data)), true)
+            );
     }
     if (b->requires_grad) {
         // grad_b = a.T @ grad_output 
-        b->grad = init_tensor(
-                MatrixMul(MatrixTranspose(a->data), grad_output->data),
-                true
-        );
+        b->grad = tensor_add(b->grad, 
+                init_tensor(MatrixMul(MatrixTranspose(a->data), grad_output->data), true)
+            );
     }
 }
 
@@ -836,6 +861,33 @@ Tensor* tensor_slice(Tensor* tensor, int from_rows, int to_rows, int from_cols, 
     );
     return out;
 }
+
+Tensor* tensor_broadcast(Tensor* tensor, int rows, int cols) {
+    Tensor* out = init_tensor(MatrixBroadcast(tensor->data, rows, cols), tensor->requires_grad);
+    return out;
+}
+
+Tensor* tensor_scale(Tensor* tensor, double scale) {
+    Tensor* out = init_tensor(MatrixScalarMul(tensor->data, scale), tensor->requires_grad);
+    
+    if (out->requires_grad) {
+        Tensor* constant = init_tensor(InitMatrix(1, 1), false);
+        constant->data->data[0] = scale;
+        Tensor* saved_tensors[2] = {out, constant};
+        out->_ctx = init_context(scale_backward, saved_tensors, 2);
+    }
+    return out;
+}
+
+void scale_backward(Context* ctx, Tensor* grad_output) {
+    Tensor* out = ctx->saved_tensors[0];
+    Tensor* scale = ctx->saved_tensors[1];
+    
+    if (out->requires_grad) {
+        out->grad = scale;
+    }
+}
+
 
 Tensor* tensor_relu(Tensor* input) {
     // relu(in) = max(0, in)

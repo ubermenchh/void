@@ -5,9 +5,9 @@
 #define MNIST_IMAGE_SIZE 784 // 28*28 
 #define MNIST_LABEL_SIZE 10 
 
-void read_mnist_data(Tensor** images, Tensor** labels) {
-    const char* image_file = "../data/train-images-idx3-ubyte.gz";
-    const char* label_file = "../data/train-labels-idx1-ubyte.gz"; 
+void read_mnist_data(Tensor** images, Tensor** labels, int num_images) {
+    const char* image_file = "../data/train-images.idx3-ubyte";
+    const char* label_file = "../data/train-labels.idx1-ubyte"; 
     FILE* f_images = fopen(image_file, "rb");
     FILE* f_labels = fopen(label_file, "rb");
 
@@ -18,18 +18,20 @@ void read_mnist_data(Tensor** images, Tensor** labels) {
     fseek(f_images, 16, SEEK_SET);
     fseek(f_labels, 8, SEEK_SET);
 
-    *images = tensor_zeros(MNIST_TRAIN_SIZE, MNIST_IMAGE_SIZE, false);
-    *labels = tensor_zeros(MNIST_TRAIN_SIZE, MNIST_LABEL_SIZE, false);
+    *images = tensor_zeros(num_images, MNIST_IMAGE_SIZE, false);
+    *labels = tensor_zeros(num_images, MNIST_LABEL_SIZE, false);
 
-    unsigned char pixel, label;
-    for (int i = 0; i < MNIST_TRAIN_SIZE*MNIST_IMAGE_SIZE; i++) {
-        fread(&pixel, 1, 1, f_images);
-        (*images)->data->data[i] = pixel;
-    }
-    for (int i = 0; i < MNIST_TRAIN_SIZE*MNIST_LABEL_SIZE; i++) {
+   unsigned char pixel, label;
+    for (int i = 0; i < num_images; i++) {
+        for (int j = 0; j < MNIST_IMAGE_SIZE; j++) {
+            fread(&pixel, 1, 1, f_images);
+            (*images)->data->data[i * MNIST_IMAGE_SIZE + j] = pixel / 255.0; 
+        }
         fread(&label, 1, 1, f_labels);
-        (*labels)->data->data[i] = (i == label) ? 1.0 : 0.0;
-    }
+        for (int j = 0; j < MNIST_LABEL_SIZE; j++) {
+            (*labels)->data->data[i * MNIST_LABEL_SIZE + j] = (j == label) ? 1.0 : 0.0;
+        }
+    } 
     
     fclose(f_images);
     fclose(f_labels);
@@ -90,30 +92,41 @@ Module* init_mlp(int in_dim, int hidden_dim, int out_dim) {
 
 int main() {
     Tensor* train_images, *train_labels;
-    read_mnist_data(&train_images, &train_labels);
+    read_mnist_data(&train_images, &train_labels, 100);
 
-    Module* net = init_mlp(MNIST_IMAGE_SIZE, 128, MNIST_LABEL_SIZE);
+    Module* net = init_mlp(MNIST_IMAGE_SIZE, 256, MNIST_LABEL_SIZE);
     int param_count;
     Tensor** params = net->parameters(net, &param_count);
     Optim* optimizer = init_sgd(params, param_count, 0.01);
     
-    int epochs = 5;
+    int epochs = 2;
     for (int epoch = 0; epoch < epochs; epoch++) {
         Tensor* output = net->forward(net, train_images);
-        Tensor* softmax_out = softmax(output);
+        printf("Output before softmax (first few values): %f, %f, %f\n", 
+            output->data->data[0], output->data->data[1], output->data->data[2]);
 
-        Tensor* loss = ce_loss(softmax_out, train_labels);
+        Tensor* loss = softmax_cross_entropy(output, train_labels);
 
         optimizer->zero_grad(optimizer);
         backward(loss);
-        optimizer->step(optimizer);
 
-        printf("|Epoch: %d | Loss: %f |\n", epoch, loss->data->data[0]);
+        for (int i = 0; i < param_count; i++) {
+            if (params[i]->grad) {
+                float grad_mag = 0;
+                for (int j = 0; j < params[i]->grad->data->rows * params[i]->grad->data->cols; j++) {
+                    grad_mag += params[i]->grad->data->data[j] * params[i]->grad->data->data[j];
+                }
+                grad_mag = sqrt(grad_mag);
+                printf("Param %d gradient magnitude: %f\n", i, grad_mag);
+            }
+        }
+
+        optimizer->step(optimizer);
+        
+        printf("| Epoch: %d | Loss: %f |\n", epoch, loss->data->data[0]);
 
         free_tensor(output);
-        free_tensor(softmax_out);
         free_tensor(loss);
-
     }
 
     free_tensor(train_images);

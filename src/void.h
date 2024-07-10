@@ -1,3 +1,6 @@
+#ifndef void_h
+#define void_h
+
 #include <flash.h>
 #include <stdbool.h>
 
@@ -57,7 +60,7 @@ void sub_backward(Context* ctx, Tensor* grad_output);
 Tensor* tensor_multiply(Tensor* a, Tensor* b);
 void mul_backward(Context* ctx, Tensor* grad_output);
 // Calculates the sum of the elements of a tensor
-Tensor* tensor_sum(Tensor* a);
+Tensor* tensor_sum(Tensor* a, int dim);
 void sum_backward(Context* ctx, Tensor* grad_output);
 // Negates all the elements of a tensor
 Tensor* tensor_negate(Tensor* a);
@@ -110,6 +113,11 @@ Tensor* tensor_concat(Tensor* a, Tensor* b, int dim);
 void concat_backward(Context* ctx, Tensor* grad_output);
 
 Tensor* tensor_slice(Tensor* tensor, int from_rows, int to_rows, int from_cols, int to_cols);
+Tensor* tensor_broadcast(Tensor* tensor, int rows, int cols);
+
+Tensor* tensor_scale(Tensor* tensor, double scale);
+void scale_backward(Context* ctx, Tensor* grad_output);
+
 // ReLU Activation Function
 Tensor* tensor_relu(Tensor* input);
 void relu_backward(Context* ctx, Tensor* grad_output);
@@ -118,10 +126,15 @@ Tensor* mse(Tensor* y_pred, Tensor* y_true);
 void mse_backward(Context* ctx, Tensor* grad_output);
 // Cross-Entropy Loss 
 Tensor* ce_loss(Tensor* output, Tensor* target);
+void ce_backward(Context* ctx, Tensor* grad_output);
 // Softmax
 Tensor* softmax(Tensor* tensor);
+void softmax_backward(Context* ctx, Tensor* grad_output);
 
-/* Layers */
+Tensor* softmax_cross_entropy(Tensor* logits, Tensor* target);
+void softmax_cross_entropy_backward(Context* ctx, Tensor* grad_output);
+
+    /* Layers */
 typedef struct Module Module;
 typedef struct Linear Linear;
 typedef struct Optim Optim;
@@ -164,3 +177,5 @@ Optim* init_sgd(Tensor** params, int param_count, double lr);
 void sgd_step(Optim* optim);
 void sgd_zero_grad(Optim* optim);
 void free_sgd(Optim* optim);
+
+#endif // void_h

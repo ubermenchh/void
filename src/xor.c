@@ -55,6 +55,30 @@ Module* init_mlp(int in_dim, int hidden_dim, int out_dim) {
     return (Module*)mlp;
 }
 
+float compute_numerical_gradient(Tensor* param, Tensor* (*loss_func)(Tensor*, Tensor*), Tensor* y_true, Tensor* y_pred, Module* net, float epsilon) {
+    float original_value = param->data->data[0];
+    
+    param->data->data[0] = original_value + epsilon;
+    Tensor* output_plus = net->forward(net, y_pred);
+    Tensor* loss_plus = loss_func(y_true, output_plus);
+    float loss_plus_value = loss_plus->data->data[0];
+    
+    param->data->data[0] = original_value - epsilon;
+    Tensor* output_minus = net->forward(net, y_pred);
+    Tensor* loss_minus = loss_func(y_true, output_minus);
+    float loss_minus_value = loss_minus->data->data[0];
+    
+    param->data->data[0] = original_value;
+    
+    float numerical_grad = (loss_plus_value - loss_minus_value) / (2 * epsilon);
+    
+    free_tensor(output_plus);
+    free_tensor(output_minus);
+    free_tensor(loss_plus);
+    free_tensor(loss_minus);
+    
+    return numerical_grad;
+}
 
 int main() {
     double x_train_data[] = {
@@ -86,9 +110,9 @@ int main() {
         Tensor* y_pred = net->forward(net, x_train);
         Tensor* loss = mse(y_train, y_pred);
 
+        optimizer->zero_grad(optimizer);
         backward(loss);
         optimizer->step(optimizer);
-        optimizer->zero_grad(optimizer);
 
         printf("Epoch: %d, Loss: %f\n", epoch, loss->data->data[0]);
 
@@ -97,6 +121,7 @@ int main() {
         free_tensor(y_pred);
         free_tensor(loss);
     } 
+
 
     free_tensor(x_train);
     free_tensor(y_train);
