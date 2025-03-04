@@ -103,7 +103,7 @@ int main() {
     Module* net = init_mlp(2, 6, 1);
     int param_count;
     Tensor** params = net->parameters(net, &param_count);
-    Optim* optimizer = init_sgd(params, param_count, 0.2);
+    Optim* optimizer = init_sgd(params, param_count, 0.02);
     
     int epochs = 100;
     for (int epoch = 0; epoch < epochs; epoch++) {

@@ -77,7 +77,7 @@ void sgd_step(Optim* optim) {
             for (int j = 0; j < param->data->rows * param->data->cols; j++) {
                 double grad = param->grad->data->data[j];
                 // data -= lr*grad
-                param->data->data[j] -= sgd->lr * grad; 
+                param->data->data[j] += sgd->lr * grad; 
             }
         }
     }

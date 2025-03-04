@@ -3,7 +3,9 @@
 
 Tensor* init_tensor(Matrix* data, bool requires_grad) {
     Tensor* tensor = (Tensor*)malloc(sizeof(Tensor));
+    if (tensor == NULL) return NULL;
     tensor->data = MatrixCopy(data);
+    if (tensor->data == NULL) free_tensor(tensor); return NULL;
     tensor->requires_grad = requires_grad;
     tensor->grad = NULL;
     tensor->_ctx = NULL;
@@ -12,7 +14,7 @@ Tensor* init_tensor(Matrix* data, bool requires_grad) {
 }
 
 void free_tensor(Tensor* tensor) {
-    if (tensor != NULL) return;
+    if (tensor == NULL) return;
     if (tensor->data != NULL) FreeMatrix(tensor->data);
     if (tensor->grad != NULL) free_tensor(tensor->grad);
     if (tensor->_ctx != NULL) {
@@ -240,10 +242,10 @@ void add_backward(Context* ctx, Tensor* grad_output) {
     Tensor* b = ctx->saved_tensors[1];
 
     if (a->requires_grad) {
-        a->grad = tensor_add(a->grad, grad_output);
+        a->grad = grad_output;
     } 
     if (b->requires_grad) {
-        b->grad = tensor_add(b->grad, grad_output);
+        b->grad = grad_output;
     }
 }
 

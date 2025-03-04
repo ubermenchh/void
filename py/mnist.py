@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 BATCH_SIZE = 32
 EPOCHS = 10
-LR = 1e-3
+LR = 1e-4
 
 def fetch_mnist():
     data_folder = "../data"

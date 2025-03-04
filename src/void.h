@@ -4,8 +4,6 @@
 #include <flash.h>
 #include <stdbool.h>
 
-#define TABLE_SIZE 1024
-
 typedef struct Tensor Tensor;
 typedef struct Context Context;
 
